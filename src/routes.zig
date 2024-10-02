@@ -13,22 +13,23 @@ pub fn init(allocator: std.mem.Allocator, config: args.config) void {
 }
 
 pub fn get_home(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
+    std.log.info("in home: from {d}\n", .{req.address.in.sa.addr});
+    res.header("Content-Type", "text/html");
     try write_out_file(res, conf.server.web_dir, index_html);
 }
 
 pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
-    try write_out_file(res, conf.server.web_dir, index_js);
+    std.log.info("in assets: {s}\n", .{req.url.path});
+    res.header("Content-Type", "text/javascript");
+    try write_out_file(res, conf.server.web_dir, req.url.path);
 }
 
 fn write_out_file(res: *httpz.Response, d: []const u8, f: []const u8) !void {
-    var path_buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    const path = try std.fs.realpath(d, &path_buffer);
-    var dir = try std.fs.openDirAbsolute(path, .{});
-    defer dir.close();
-    const bytes = try dir.readFileAlloc(alloc, f, std.math.maxInt(usize));
+    const cur_dir = std.fs.cwd();
+    const path = try std.fs.path.join(alloc, &[2][]u8{ @constCast(d), @constCast(f) });
+    defer alloc.free(path);
+    const bytes = try cur_dir.readFileAlloc(alloc, path, std.math.maxInt(usize));
     defer alloc.free(bytes);
-    try res.chunk(bytes);
+    res.body = bytes;
     try res.write();
 }

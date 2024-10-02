@@ -14,14 +14,17 @@ pub fn main() !void {
         return err;
     };
     // Setup handler's context before setting websocket route
-    var handler = channel.handler.init(gpa.allocator(), config_values) catch |err| {
+    channel.init(std.heap.page_allocator, config_values) catch |err| {
         std.debug.print("error initializing channel handler: {}\n", .{err});
         return err;
     };
-    defer handler.deinit() catch |err| {
+    defer channel.deinit() catch |err| {
         std.debug.print("handler deinit failed: {}\n", .{err});
     };
-    server = try httpz.Server().init(gpa.allocator(), .{ .port = config_values.server.port });
+    server = try httpz.Server().init(gpa.allocator(), .{
+        .address = config_values.server.host,
+        .port = config_values.server.port,
+    });
     defer server.deinit();
 
     // now that our server is up, we register our intent to handle SIGINT
@@ -36,13 +39,18 @@ pub fn main() !void {
     // a normal route
     router.get("/ws", channel.ws);
     router.get("/", routes.get_home);
-    router.get("/static", routes.get_assets);
+    router.get("/static/*", routes.get_assets);
 
     // this will block until server.stop() is called
     // which will then run the server.deinit() we setup above with `defer`
+    std.log.info("starting server on address: {s}:{d}\n", .{
+        config_values.server.host,
+        config_values.server.port,
+    });
     try server.listen();
 }
 
 fn shutdown(_: c_int) callconv(.C) void {
+    channel.ctx.running = false;
     server.stop();
 }
