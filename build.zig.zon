@@ -24,8 +24,12 @@
     // internet connectivity.
     .dependencies = .{
         .pg = .{
-            .url = "git+https://github.com/karlseguin/pg.zig?ref=master#9632aead37c8f0023bd786209292ebcbad040e8f",
-            .hash = "122055ea180e340e5aa5c621588f9e7863707f9f27144286bc5ab293acb6ab91a4ec",
+            .url = "git+https://github.com/karlseguin/pg.zig?ref=zig-0.13#239a4468163a49d8c0d03285632eabe96003e9e2",
+            .hash = "1220a1d7e51e2fa45e547c76a9e099c09d06e14b0b9bfc6baa89367f56f1ded399a0",
+        },
+        .clap = .{
+            .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.9.1.tar.gz",
+            .hash = "122062d301a203d003547b414237229b09a7980095061697349f8bef41be9c30266b",
         },
     },
     .paths = .{

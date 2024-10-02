@@ -1,29 +1,37 @@
 const std = @import("std");
 const db = @import("db.zig");
-
-/// use this to get list of all tables in DB
-//SELECT
-//    table_schema || '.' || table_name
-//FROM
-//    information_schema.tables
-//WHERE
-//    table_type = 'BASE TABLE'
-//AND
-//    table_schema NOT IN ('pg_catalog', 'information_schema', 'typeorm');
-//
-//create or replace function f_signal_collector()returns trigger as $f$
-//begin perform pg_notify('incoming_signals_feed',to_jsonb(new)::text);
-//      return new;
-//end $f$ language plpgsql;
-//
-//create trigger t_signal_collector after insert or update on table_all_signals
-//for each row execute function f_signal_collector();
-//
-//
-// DROP FUNCTION IF EXISTS <name>;
-// DROP TRIGGER IF EXISTS <name> ON <table_name>;
+const args = @import("args.zig");
 
 pub fn main() !void {
-    var driver = try db.driver.init(std.heap.page_allocator);
-    defer driver.deinit();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const config_values = args.parse_args(gpa.allocator()) catch |err| {
+        if (err == args.arg_error.help) return;
+        return err;
+    };
+    var driver = db.driver.init(std.heap.page_allocator, config_values) catch |err| {
+        std.debug.print("initialize failed: {}\n", .{err});
+        return err;
+    };
+    defer driver.deinit() catch |err| {
+        std.debug.print("error deinitializing: {}\n", .{err});
+    };
+    driver.setup_listeners() catch |err| {
+        std.debug.print("initialize failed: {}\n", .{err});
+        return err;
+    };
+    for (driver.tables.items) |name| {
+        std.debug.print("table_name={s}\n", .{name});
+    }
+    var idx: usize = 0;
+    while (idx < 10) {
+        while (driver.listener.next()) |notification| {
+            std.debug.print("Channel: {s}\nPayload: {s}", .{ notification.channel, notification.payload });
+        }
+        switch (driver.listener.err.?) {
+            .pg => |pg| std.debug.print("{s}\n", .{pg.message}),
+            .err => |err| std.debug.print("{s}\n", .{@errorName(err)}),
+        }
+        idx += 1;
+    }
 }

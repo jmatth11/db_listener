@@ -26,8 +26,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const clap = b.dependency("clap", .{});
+
+    exe.linkLibC();
 
     exe.root_module.addImport("pg", pg.module("pg"));
+    exe.root_module.addImport("clap", clap.module("clap"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
