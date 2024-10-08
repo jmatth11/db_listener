@@ -10,3 +10,7 @@ This was driven by the desire to debug DB changes easier for local development.
 
 
 This program also spins up a small server that allows for a websocket connection to get updates on the DB notifications.
+
+## Demo
+
+https://github.com/user-attachments/assets/e6ab4dd6-138d-4afb-b002-115766010c2f
