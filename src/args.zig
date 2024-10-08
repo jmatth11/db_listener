@@ -1,31 +1,52 @@
 const std = @import("std");
 const clap = @import("clap");
 
+/// Argument Error Types
 pub const arg_error = error{
+    /// Error type to signal the user requesting the help menu.
     help,
+    /// Generic invalid parameter for an argument.
     invalid_param,
 };
 
+/// Configuration values for Postgres database.
 pub const db_info = struct {
+    /// The host address
     host: []const u8 = "0.0.0.0",
+    /// The port number
     port: u16 = 5432,
+    /// The username to the DB
     username: []const u8 = "postgres",
+    /// The password to the DB
     password: []const u8 = "postgres",
+    /// The database name to connect to.
     database: []const u8 = "postgres",
+    /// The timeout for connections.
     timeout: u32 = 10_000,
 };
 
+/// Configuration values for the HTTP server.
 pub const server_info = struct {
+    /// Server host address
     host: []const u8 = "0.0.0.0",
+    /// Server port number
     port: u16 = 3000,
+    /// Server front-end web folder
     web_dir: []const u8 = "web/",
 };
 
+/// Configuration structure for services.
 pub const config = struct {
+    /// Postgres DB
     pg: db_info = db_info{},
+    /// HTTP Server
     server: server_info = server_info{},
 };
 
+/// Parse command line arguments.
+///
+/// @param alloc Standard allocator.
+/// @return config structure on success, error value otherwise.
 pub fn parse_args(alloc: std.mem.Allocator) !config {
     var result: config = config{};
     const params = comptime clap.parseParamsComptime(
