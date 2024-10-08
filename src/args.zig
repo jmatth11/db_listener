@@ -18,6 +18,7 @@ pub const config = struct {
     server: struct {
         host: []const u8 = "localhost",
         port: u16 = 3000,
+        web_dir: []const u8 = "web/",
     },
 };
 
@@ -30,8 +31,9 @@ pub fn parse_args(alloc: std.mem.Allocator) !config {
         \\    --pg_username <str> Postgres Username.
         \\    --pg_password <str> Postgres Password.
         \\    --pg_database <str> Postgres Database.
-        \\    --server_host <str> Postgres Server Host.
-        \\    --server_port <u16> Postgres Server Port.
+        \\    --server_host <str> Web Server Host.
+        \\    --server_port <u16> Web Server Port.
+        \\    --web_dir <str>     The front-end web directory.
         \\
     );
 
@@ -62,5 +64,7 @@ pub fn parse_args(alloc: std.mem.Allocator) !config {
         result.server.host = val;
     if (res.args.server_port) |val|
         result.server.port = val;
+    if (res.args.web_dir) |val|
+        result.server.web_dir = val;
     return result;
 }
