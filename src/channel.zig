@@ -11,6 +11,7 @@ var driver: db.driver = undefined;
 const notification = struct {
     channel: []const u8,
     payload: []const u8,
+    metadata: db.table_info,
 };
 
 pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
@@ -18,6 +19,9 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
     driver = db.driver.init(alloc, conf) catch |err| {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
+    };
+    errdefer driver.deinit() catch |err| {
+        std.debug.print("errdefer driver.deinit failed: {}\n", .{err});
     };
     driver.setup_listeners() catch |err| {
         std.debug.print("initialize failed: {}\n", .{err});
@@ -40,10 +44,14 @@ pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
 
 fn listener(conn: *websocket.Conn) !void {
     std.log.info("listening on tables:\n", .{});
-    for (driver.tables.items) |name| {
-        std.log.info("table_name={s}\n", .{name});
+    var metadata_hm = std.StringHashMap(*db.table_info).init(alloc);
+    defer metadata_hm.deinit();
+    for (0..driver.tables.items.len) |idx| {
+        const table: *db.table_info = &driver.tables.items[idx];
+        std.log.info("table_name={s}\n", .{table.name});
+        try metadata_hm.put(table.name, table);
     }
-    var out_buffer: [4096 * 4]u8 = undefined;
+    var out_buffer: [4096 * 6]u8 = undefined;
     var fixed_alloc = std.heap.FixedBufferAllocator.init(&out_buffer);
     while (ctx.running) {
         fixed_alloc.reset();
@@ -52,7 +60,9 @@ fn listener(conn: *websocket.Conn) !void {
             const info = notification{
                 .channel = notif.channel,
                 .payload = notif.payload,
+                .metadata = metadata_hm.get(notif.channel).?.*,
             };
+            info.metadata.to_str();
             try std.json.stringify(
                 info,
                 .{},

@@ -34,7 +34,7 @@ pub fn main() !void {
         .flags = 0,
     }, null);
 
-    routes.init(gpa.allocator(), config_values);
+    routes.init(config_values);
     var router = server.router();
     // a normal route
     router.get("/ws", channel.ws);

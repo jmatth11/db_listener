@@ -3,12 +3,12 @@ const httpz = @import("httpz");
 const args = @import("args.zig");
 
 var conf: args.config = undefined;
-var alloc: std.mem.Allocator = undefined;
+var str_buffer: [4096 * 4]u8 = undefined;
+var alloc: std.heap.FixedBufferAllocator = undefined;
 const index_html = "index.html";
-const index_js = "static/index.js";
 
-pub fn init(allocator: std.mem.Allocator, config: args.config) void {
-    alloc = allocator;
+pub fn init(config: args.config) void {
+    alloc = std.heap.FixedBufferAllocator.init(@constCast(&str_buffer));
     conf = config;
 }
 
@@ -25,11 +25,18 @@ pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn write_out_file(res: *httpz.Response, d: []const u8, f: []const u8) !void {
+    defer alloc.reset();
     const cur_dir = std.fs.cwd();
-    const path = try std.fs.path.join(alloc, &[2][]u8{ @constCast(d), @constCast(f) });
-    defer alloc.free(path);
-    const bytes = try cur_dir.readFileAlloc(alloc, path, std.math.maxInt(usize));
-    defer alloc.free(bytes);
+    const path = try std.fs.path.join(alloc.allocator(), &[2][]u8{ @constCast(d), @constCast(f) });
+    const bytes = cur_dir.readFileAlloc(alloc.allocator(), path, std.math.maxInt(usize)) catch {
+        // this block is if we run out of memory with the fixed buffer
+        // so we use heap allocation instead
+        const bytes = try cur_dir.readFileAlloc(std.heap.page_allocator, path, std.math.maxInt(usize));
+        defer std.heap.page_allocator.free(bytes);
+        res.body = bytes;
+        try res.write();
+        return;
+    };
     res.body = bytes;
     try res.write();
 }

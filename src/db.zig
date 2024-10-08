@@ -2,34 +2,30 @@ const std = @import("std");
 const pg = @import("pg");
 const args = @import("args.zig");
 
-//
-// Use this to find foreign key constraints for each table
-//
-//SELECT
-//	kcu.column_name,
-//    ccu.table_schema || '.' || ccu.table_name AS f_table_name,
-//    ccu.column_name AS f_column_name
-//FROM information_schema.table_constraints AS tc
-//JOIN information_schema.key_column_usage AS kcu
-//    ON tc.constraint_name = kcu.constraint_name
-//    AND tc.table_schema = kcu.table_schema
-//JOIN information_schema.constraint_column_usage AS ccu
-//    ON ccu.constraint_name = tc.constraint_name
-//WHERE tc.constraint_type = 'FOREIGN KEY'
-//    AND tc.table_schema='<schema_name>'
-//    AND tc.table_name='<table_name>';
-//
-// Use this to grab primary key info
-//
-//SELECT c.column_name, c.data_type
-//FROM information_schema.table_constraints tc
-//JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
-//JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
-//  AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
-//WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = '<table_name>' and c.table_schema='<schema>';
-//
-
 const tables_query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema', 'typeorm');";
+const foreign_keys_query =
+    \\SELECT
+    \\	kcu.column_name,
+    \\    ccu.table_schema || '.' || ccu.table_name AS f_table_name,
+    \\    ccu.column_name AS f_column_name
+    \\FROM information_schema.table_constraints AS tc
+    \\JOIN information_schema.key_column_usage AS kcu
+    \\    ON tc.constraint_name = kcu.constraint_name
+    \\    AND tc.table_schema = kcu.table_schema
+    \\JOIN information_schema.constraint_column_usage AS ccu
+    \\    ON ccu.constraint_name = tc.constraint_name
+    \\WHERE tc.constraint_type = 'FOREIGN KEY'
+    \\    AND tc.table_schema='{s}'
+    \\    AND tc.table_name='{s}';
+;
+const primary_key_query =
+    \\SELECT c.column_name, c.data_type
+    \\FROM information_schema.table_constraints tc
+    \\JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
+    \\JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+    \\  AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+    \\WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = '{s}' and c.table_schema='{s}';
+;
 const create_funcs =
     \\create or replace function {s}_fn()returns trigger as $f$
     \\begin perform pg_notify('{s}',to_jsonb(new)::text);
@@ -43,9 +39,55 @@ const create_triggers =
 const drop_functions = "DROP FUNCTION IF EXISTS {s}_fn;";
 const drop_triggers = "DROP TRIGGER IF EXISTS {s}_tr ON {s};";
 
+pub const metadata_t = struct {
+    const PRIMARY_KEY = "PRIMARY_KEY";
+    const FOREIGN_KEY = "FOREIGN_KEY";
+};
+
+pub const connection_table = struct {
+    table_name: []u8,
+    column_name: []u8,
+};
+
+pub const column_info = struct {
+    column_name: []u8,
+    connection_table: ?connection_table = null,
+};
+
+pub const metadata = struct {
+    type: [*:0]const u8,
+    columns: ?[]column_info,
+};
+
+pub const table_info = struct {
+    name: []u8,
+    metadatas: [2]metadata,
+
+    pub fn to_str(self: *const table_info) void {
+        std.debug.print("name: {s}\n", .{self.name});
+        std.debug.print("metadatas:\n", .{});
+        for (self.metadatas) |md| {
+            std.debug.print("  type: {s}\n", .{md.type});
+            std.debug.print("  columns:\n", .{});
+            if (md.columns) |columns| {
+                for (columns) |col| {
+                    std.debug.print("    column_name: {s}\n", .{col.column_name});
+                    std.debug.print("    connection_table:\n", .{});
+                    if (col.connection_table) |ct| {
+                        std.debug.print("      table_name: {s}\n", .{ct.table_name});
+                        std.debug.print("      column_name: {s}\n", .{ct.column_name});
+                    }
+                }
+            }
+        }
+    }
+};
+
 pub const driver = struct {
+    str_buffer: [4096 * 2]u8,
+    fpa: std.heap.FixedBufferAllocator,
     alloc: std.mem.Allocator,
-    tables: std.ArrayList([]u8),
+    tables: std.ArrayList(table_info),
     pool: *pg.Pool,
     listener: pg.Listener,
 
@@ -64,20 +106,101 @@ pub const driver = struct {
             },
         });
         errdefer db.deinit();
-        return driver{
+        var driver_obj = driver{
             .alloc = alloc,
-            .tables = std.ArrayList([]u8).init(alloc),
+            .tables = std.ArrayList(table_info).init(alloc),
             .listener = undefined,
             .pool = db,
+            .fpa = undefined,
+            .str_buffer = undefined,
         };
+        driver_obj.fpa = std.heap.FixedBufferAllocator.init(@constCast(&driver_obj.str_buffer));
+        return driver_obj;
+    }
+
+    fn make_str_copy(self: *driver, row: pg.Row, idx: usize) ![]u8 {
+        const value = row.get([]u8, idx);
+        const result = try self.alloc.alloc(u8, value.len);
+        @memcpy(result, value);
+        return result;
     }
 
     fn single_grab_table(self: *driver, row: pg.Row) !void {
-        const name = row.get([]u8, 0);
-        const name_copy = try self.alloc.alloc(u8, name.len);
-        errdefer self.alloc.free(name_copy);
-        @memcpy(name_copy, name);
-        try self.tables.append(name_copy);
+        const local_info = table_info{
+            .name = try self.make_str_copy(row, 0),
+            .metadatas = undefined,
+        };
+        errdefer self.alloc.free(local_info.name);
+        try self.tables.append(local_info);
+    }
+
+    fn grab_primary_keys(self: *driver, table: table_info) !metadata {
+        defer self.fpa.reset();
+        const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
+        const table_name = table.name[(dot_idx + 1)..];
+        const schema_name = table.name[0..dot_idx];
+        const query = try std.fmt.allocPrint(
+            self.fpa.allocator(),
+            primary_key_query,
+            .{ table_name, schema_name },
+        );
+        const result = try self.pool.query(query, .{});
+        defer result.deinit();
+        var idx: usize = 0;
+        var md: metadata = metadata{
+            .type = metadata_t.PRIMARY_KEY,
+            .columns = null,
+        };
+        errdefer self.alloc.free(md.columns.?);
+        while (try result.next()) |row| {
+            if (idx == 0) {
+                md.columns = try self.alloc.alloc(column_info, 1);
+            } else {
+                if (!self.alloc.resize(md.columns.?, idx + 1)) {
+                    std.log.err("resizing column failed.\n", .{});
+                }
+            }
+            md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
+            md.columns.?[idx].connection_table = null;
+            idx += 1;
+        }
+        return md;
+    }
+
+    fn grab_foreign_keys(self: *driver, table: table_info) !metadata {
+        defer self.fpa.reset();
+        const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
+        const table_name = table.name[(dot_idx + 1)..];
+        const schema_name = table.name[0..dot_idx];
+        const query = try std.fmt.allocPrint(
+            self.fpa.allocator(),
+            foreign_keys_query,
+            .{ schema_name, table_name },
+        );
+        const result = try self.pool.query(query, .{});
+        defer result.deinit();
+        var idx: usize = 0;
+        var md: metadata = metadata{
+            .type = metadata_t.FOREIGN_KEY,
+            .columns = null,
+        };
+        errdefer self.alloc.free(md.columns.?);
+        while (try result.next()) |row| {
+            if (idx == 0) {
+                md.columns = try self.alloc.alloc(column_info, 1);
+            } else {
+                if (!self.alloc.resize(md.columns.?, idx + 1)) {
+                    std.log.err("resizing column failed.\n", .{});
+                }
+            }
+            md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
+            md.columns.?[idx].connection_table = connection_table{
+                .table_name = try self.make_str_copy(row, 1),
+                .column_name = try self.make_str_copy(row, 2),
+            };
+            idx += 1;
+        }
+        return md;
     }
 
     fn grab_tables(self: *driver) !void {
@@ -86,18 +209,20 @@ pub const driver = struct {
         while (try results.next()) |row| {
             try self.single_grab_table(row);
         }
+        for (self.tables.items, 0..) |table, idx| {
+            self.tables.items[idx].metadatas[0] = try self.grab_primary_keys(table);
+            self.tables.items[idx].metadatas[1] = try self.grab_foreign_keys(table);
+        }
     }
 
-    fn single_creation_query(self: *driver, table: []u8) !void {
-        const safe_name = try self.sanitize_name(table);
-        defer self.alloc.free(safe_name);
+    fn single_creation_query(self: *driver, table: table_info) !void {
+        defer self.fpa.reset();
+        const safe_name = try driver.sanitize_name(self.fpa.allocator(), table.name);
 
-        const func_query = try std.fmt.allocPrint(self.alloc, create_funcs, .{ safe_name, table });
-        defer self.alloc.free(func_query);
+        const func_query = try std.fmt.allocPrint(self.fpa.allocator(), create_funcs, .{ safe_name, table.name });
         _ = try self.pool.exec(func_query, .{});
 
-        const trigger_query = try std.fmt.allocPrint(self.alloc, create_triggers, .{ safe_name, table, safe_name });
-        defer self.alloc.free(trigger_query);
+        const trigger_query = try std.fmt.allocPrint(self.fpa.allocator(), create_triggers, .{ safe_name, table.name, safe_name });
         _ = try self.pool.exec(trigger_query, .{});
     }
 
@@ -108,16 +233,14 @@ pub const driver = struct {
         }
     }
 
-    fn single_delete_query(self: *driver, table: []u8) !void {
-        const safe_name = try self.sanitize_name(table);
-        defer self.alloc.free(safe_name);
+    fn single_delete_query(self: *driver, table: table_info) !void {
+        defer self.fpa.reset();
+        const safe_name = try driver.sanitize_name(self.fpa.allocator(), table.name);
 
-        const drop_trigger_query = try std.fmt.allocPrint(self.alloc, drop_triggers, .{ safe_name, table });
-        defer self.alloc.free(drop_trigger_query);
+        const drop_trigger_query = try std.fmt.allocPrint(self.fpa.allocator(), drop_triggers, .{ safe_name, table.name });
         _ = try self.pool.exec(drop_trigger_query, .{});
 
-        const drop_func_query = try std.fmt.allocPrint(self.alloc, drop_functions, .{safe_name});
-        defer self.alloc.free(drop_func_query);
+        const drop_func_query = try std.fmt.allocPrint(self.fpa.allocator(), drop_functions, .{safe_name});
         _ = try self.pool.exec(drop_func_query, .{});
     }
 
@@ -132,7 +255,7 @@ pub const driver = struct {
         try self.execute_creation_queries();
         self.listener = try self.pool.newListener();
         for (self.tables.items) |table| {
-            try self.listener.listen(table);
+            try self.listener.listen(table.name);
         }
     }
 
@@ -143,15 +266,30 @@ pub const driver = struct {
 
     pub fn deinit(self: *driver) !void {
         try self.tear_down_listeners();
-        for (self.tables.items) |item| {
-            self.alloc.free(item);
+        for (0..self.tables.items.len) |table_idx| {
+            const table = self.tables.items[table_idx];
+            self.alloc.free(table.name);
+            for (0..table.metadatas.len) |md_idx| {
+                const md = table.metadatas[md_idx];
+                if (md.columns) |columns| {
+                    for (0..columns.len) |col_idx| {
+                        const col = columns[col_idx];
+                        self.alloc.free(col.column_name);
+                        if (col.connection_table) |ct| {
+                            self.alloc.free(ct.column_name);
+                            self.alloc.free(ct.table_name);
+                        }
+                    }
+                    self.alloc.free(md.columns.?);
+                }
+            }
         }
         self.tables.deinit();
         self.pool.deinit();
     }
 
-    fn sanitize_name(self: *driver, name: []u8) ![]u8 {
-        const result: []u8 = try self.alloc.alloc(u8, name.len);
+    fn sanitize_name(alloc: std.mem.Allocator, name: []u8) ![]u8 {
+        const result: []u8 = try alloc.alloc(u8, name.len);
         for (name, 0..) |ch, idx| {
             if (ch != '.') {
                 result[idx] = ch;
