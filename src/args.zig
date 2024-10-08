@@ -6,24 +6,28 @@ pub const arg_error = error{
     invalid_param,
 };
 
+pub const db_info = struct {
+    host: []const u8 = "0.0.0.0",
+    port: u16 = 5432,
+    username: []const u8 = "postgres",
+    password: []const u8 = "postgres",
+    database: []const u8 = "postgres",
+    timeout: u32 = 10_000,
+};
+
+pub const server_info = struct {
+    host: []const u8 = "0.0.0.0",
+    port: u16 = 3000,
+    web_dir: []const u8 = "web/",
+};
+
 pub const config = struct {
-    pg: struct {
-        host: []const u8 = "127.0.0.1",
-        port: u16 = 5432,
-        username: []const u8 = "postgres",
-        password: []const u8 = "postgres",
-        database: []const u8 = "postgres",
-        timeout: u32 = 10_000,
-    },
-    server: struct {
-        host: []const u8 = "localhost",
-        port: u16 = 3000,
-        web_dir: []const u8 = "web/",
-    },
+    pg: db_info = db_info{},
+    server: server_info = server_info{},
 };
 
 pub fn parse_args(alloc: std.mem.Allocator) !config {
-    var result: config = undefined;
+    var result: config = config{};
     const params = comptime clap.parseParamsComptime(
         \\-h, --help              Display this help and exit.
         \\    --pg_host <str>     Postgres Host name.

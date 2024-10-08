@@ -23,34 +23,41 @@ pub const driver = struct {
     listener: pg.Listener,
 
     pub fn init(alloc: std.mem.Allocator, conf: args.config) !driver {
+        const db = try pg.Pool.init(alloc, .{
+            .size = 5,
+            .connect = .{
+                .port = conf.pg.port,
+                .host = conf.pg.host,
+            },
+            .auth = .{
+                .username = conf.pg.username,
+                .password = conf.pg.password,
+                .database = conf.pg.database,
+                .timeout = conf.pg.timeout,
+            },
+        });
+        errdefer db.deinit();
         return driver{
             .alloc = alloc,
             .tables = std.ArrayList([]u8).init(alloc),
             .listener = undefined,
-            .pool = try pg.Pool.init(alloc, .{
-                .size = 5,
-                .connect = .{
-                    .port = conf.pg.port,
-                    .host = conf.pg.host,
-                },
-                .auth = .{
-                    .username = conf.pg.username,
-                    .password = conf.pg.password,
-                    .database = conf.pg.database,
-                    .timeout = conf.pg.timeout,
-                },
-            }),
+            .pool = db,
         };
+    }
+
+    fn single_grab_table(self: *driver, row: pg.Row) !void {
+        const name = row.get([]u8, 0);
+        const name_copy = try self.alloc.alloc(u8, name.len);
+        errdefer self.alloc.free(name_copy);
+        @memcpy(name_copy, name);
+        try self.tables.append(name_copy);
     }
 
     fn grab_tables(self: *driver) !void {
         var results = try self.pool.query(tables_query, .{});
         defer results.deinit();
         while (try results.next()) |row| {
-            const name = row.get([]u8, 0);
-            const name_copy = try self.alloc.alloc(u8, name.len);
-            @memcpy(name_copy, name);
-            try self.tables.append(name_copy);
+            try self.single_grab_table(row);
         }
     }
 
@@ -68,6 +75,7 @@ pub const driver = struct {
     }
 
     fn execute_creation_queries(self: *driver) !void {
+        try self.execute_deletion_queries();
         for (self.tables.items) |table| {
             try self.single_creation_query(table);
         }
