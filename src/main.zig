@@ -1,6 +1,10 @@
 const std = @import("std");
-const db = @import("db.zig");
 const args = @import("args.zig");
+const httpz = @import("httpz");
+const channel = @import("channel.zig");
+const routes = @import("routes.zig");
+
+var server: httpz.ServerCtx(void, void) = undefined;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -9,29 +13,36 @@ pub fn main() !void {
         if (err == args.arg_error.help) return;
         return err;
     };
-    var driver = db.driver.init(std.heap.page_allocator, config_values) catch |err| {
-        std.debug.print("initialize failed: {}\n", .{err});
+    // Setup handler's context before setting websocket route
+    var handler = channel.handler.init(gpa.allocator(), config_values) catch |err| {
+        std.debug.print("error initializing channel handler: {}\n", .{err});
         return err;
     };
-    defer driver.deinit() catch |err| {
-        std.debug.print("error deinitializing: {}\n", .{err});
+    defer handler.deinit() catch |err| {
+        std.debug.print("handler deinit failed: {}\n", .{err});
     };
-    driver.setup_listeners() catch |err| {
-        std.debug.print("initialize failed: {}\n", .{err});
-        return err;
-    };
-    for (driver.tables.items) |name| {
-        std.debug.print("table_name={s}\n", .{name});
-    }
-    var idx: usize = 0;
-    while (idx < 10) {
-        while (driver.listener.next()) |notification| {
-            std.debug.print("Channel: {s}\nPayload: {s}", .{ notification.channel, notification.payload });
-        }
-        switch (driver.listener.err.?) {
-            .pg => |pg| std.debug.print("{s}\n", .{pg.message}),
-            .err => |err| std.debug.print("{s}\n", .{@errorName(err)}),
-        }
-        idx += 1;
-    }
+    server = try httpz.Server().init(gpa.allocator(), .{ .port = config_values.server.port });
+    defer server.deinit();
+
+    // now that our server is up, we register our intent to handle SIGINT
+    try std.posix.sigaction(std.posix.SIG.INT, &.{
+        .handler = .{ .handler = shutdown },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    }, null);
+
+    routes.init(gpa.allocator(), config_values);
+    var router = server.router();
+    // a normal route
+    router.get("/ws", channel.ws);
+    router.get("/", routes.get_home);
+    router.get("/static", routes.get_assets);
+
+    // this will block until server.stop() is called
+    // which will then run the server.deinit() we setup above with `defer`
+    try server.listen();
+}
+
+fn shutdown(_: c_int) callconv(.C) void {
+    server.stop();
 }

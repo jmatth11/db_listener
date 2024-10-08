@@ -27,9 +27,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const clap = b.dependency("clap", .{});
+    const httpz_module = b.dependency("httpz", .{ .target = target, .optimize = optimize }).module("httpz");
 
     exe.linkLibC();
 
+    exe.root_module.addImport("httpz", httpz_module);
     exe.root_module.addImport("pg", pg.module("pg"));
     exe.root_module.addImport("clap", clap.module("clap"));
 
