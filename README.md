@@ -9,7 +9,7 @@ You can use this info to display new or updated entries happening to your databa
 This was driven by the desire to debug DB changes easier for local development.
 
 
-This program also spins up a small server that allows for a websocket connection to get updates on the DB notifications.
+This program also spins up a small server that allows for a websocket connection to get updates on the DB notifications. You can find a default implementation [here](https://github.com/jmatth11/db_listener_web)
 
 ## Demo
 
