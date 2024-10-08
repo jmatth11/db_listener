@@ -13,13 +13,13 @@ pub fn init(config: args.config) void {
 }
 
 pub fn get_home(req: *httpz.Request, res: *httpz.Response) !void {
-    std.log.info("in home: from {d}\n", .{req.address.in.sa.addr});
+    std.log.info("in home: from {d}", .{req.address.in.sa.addr});
     res.header("Content-Type", "text/html");
     try write_out_file(res, conf.server.web_dir, index_html);
 }
 
 pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
-    std.log.info("in assets: {s}\n", .{req.url.path});
+    std.log.info("in assets: {s}", .{req.url.path});
     res.header("Content-Type", "text/javascript");
     try write_out_file(res, conf.server.web_dir, req.url.path);
 }

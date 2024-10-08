@@ -8,12 +8,17 @@ pub var ctx: Context = undefined;
 var alloc: std.mem.Allocator = undefined;
 var driver: db.driver = undefined;
 
+/// Notification structure to send to the connected web socket client.
 const notification = struct {
+    /// The channel (table schema and name)
     channel: []const u8,
+    /// The payload (payload from pg_notify)
     payload: []const u8,
+    /// Metadata info (primary key and foreign key info)
     metadata: db.table_info,
 };
 
+/// Initialize the DB and websocket client.
 pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
     alloc = allocator;
     driver = db.driver.init(alloc, conf) catch |err| {
@@ -29,10 +34,13 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
     };
     ctx = Context{};
 }
+
+/// Deinitialize the channel internals
 pub fn deinit() !void {
     try driver.deinit();
 }
 
+/// Websocket route
 pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
     if (try httpz.upgradeWebsocket(ws_handler, req, res, ctx) == false) {
         res.status = 400;
@@ -42,6 +50,7 @@ pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
     // when upgradeWebsocket succeeds, you can no longer use `res`
 }
 
+/// The main listener function to communicate DB notifications to the front-end.
 fn listener(conn: *websocket.Conn) !void {
     std.log.info("listening on tables:", .{});
     var metadata_hm = std.StringHashMap(*db.table_info).init(alloc);
@@ -83,15 +92,18 @@ fn listener(conn: *websocket.Conn) !void {
     }
 }
 
+/// Main context object to bridge data across threads
 const Context = struct {
     running: bool = true,
 };
 
-// MUST have these 3 public functions
+/// Websocket handler
 const ws_handler = struct {
     ctx: Context,
     conn: *websocket.Conn,
     listening_thread: std.Thread,
+
+    // MUST have these 3 public functions
     pub fn init(conn: *websocket.Conn, ctx_t: Context) !ws_handler {
         return .{
             .conn = conn,

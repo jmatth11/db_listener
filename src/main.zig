@@ -9,6 +9,8 @@ var server: httpz.ServerCtx(void, void) = undefined;
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
+
+    // parse cli arguments
     const config_values = args.parse_args(gpa.allocator()) catch |err| {
         if (err == args.arg_error.help) return;
         return err;
@@ -21,19 +23,21 @@ pub fn main() !void {
     defer channel.deinit() catch |err| {
         std.debug.print("handler deinit failed: {}\n", .{err});
     };
+    // setup server
     server = try httpz.Server().init(gpa.allocator(), .{
         .address = config_values.server.host,
         .port = config_values.server.port,
     });
     defer server.deinit();
 
-    // now that our server is up, we register our intent to handle SIGINT
+    // register our intent to handle SIGINT
     try std.posix.sigaction(std.posix.SIG.INT, &.{
         .handler = .{ .handler = shutdown },
         .mask = std.posix.empty_sigset,
         .flags = 0,
     }, null);
 
+    // setup routes
     routes.init(config_values);
     var router = server.router();
     // a normal route
@@ -47,6 +51,7 @@ pub fn main() !void {
         config_values.server.host,
         config_values.server.port,
     });
+
     try server.listen();
 }
 

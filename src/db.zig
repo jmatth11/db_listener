@@ -2,6 +2,7 @@ const std = @import("std");
 const pg = @import("pg");
 const args = @import("args.zig");
 
+/// postgres queries for grabbing tables and metadata info.
 const tables_query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema', 'typeorm');";
 const foreign_keys_query =
     \\SELECT
@@ -39,30 +40,36 @@ const create_triggers =
 const drop_functions = "DROP FUNCTION IF EXISTS {s}_fn;";
 const drop_triggers = "DROP TRIGGER IF EXISTS {s}_tr ON {s};";
 
+/// metadata type info
 pub const metadata_t = struct {
     const PRIMARY_KEY = "PRIMARY_KEY";
     const FOREIGN_KEY = "FOREIGN_KEY";
 };
 
+/// Structure to hold tables connected by foreign keys.
 pub const connection_table = struct {
     table_name: []u8,
     column_name: []u8,
 };
 
+/// Structure to hold column_name that is a foreign key along with connected table info.
 pub const column_info = struct {
     column_name: []u8,
     connection_table: ?connection_table = null,
 };
 
+/// Metadata structure to hold primary/foreign key info.
 pub const metadata = struct {
     type: [*:0]const u8,
     columns: ?[]column_info,
 };
 
+/// Structure to hold Table info.
 pub const table_info = struct {
     name: []u8,
     metadatas: [2]metadata,
 
+    /// Print out table info for debug purposes.
     pub fn to_str(self: *const table_info) void {
         std.debug.print("name: {s}\n", .{self.name});
         std.debug.print("metadatas:\n", .{});
@@ -83,6 +90,7 @@ pub const table_info = struct {
     }
 };
 
+/// Main driver of DB connections and queries.
 pub const driver = struct {
     str_buffer: [4096 * 2]u8,
     fpa: std.heap.FixedBufferAllocator,
