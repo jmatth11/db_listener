@@ -43,12 +43,12 @@ pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn listener(conn: *websocket.Conn) !void {
-    std.log.info("listening on tables:\n", .{});
+    std.log.info("listening on tables:", .{});
     var metadata_hm = std.StringHashMap(*db.table_info).init(alloc);
     defer metadata_hm.deinit();
     for (0..driver.tables.items.len) |idx| {
         const table: *db.table_info = &driver.tables.items[idx];
-        std.log.info("table_name={s}\n", .{table.name});
+        std.log.info("table_name={s}", .{table.name});
         try metadata_hm.put(table.name, table);
     }
     var out_buffer: [4096 * 6]u8 = undefined;
@@ -102,7 +102,10 @@ const ws_handler = struct {
 
     pub fn handle(self: *ws_handler, message: websocket.Message) !void {
         const data = message.data;
-        try self.conn.write(data); // echo the message back
+        if (std.mem.eql(u8, data, "close")) {
+            ctx.running = false;
+            self.listening_thread.join();
+        }
     }
 
     pub fn close(self: *ws_handler) void {
