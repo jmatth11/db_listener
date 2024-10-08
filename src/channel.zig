@@ -54,8 +54,8 @@ fn listener(conn: *websocket.Conn) !void {
     var out_buffer: [4096 * 6]u8 = undefined;
     var fixed_alloc = std.heap.FixedBufferAllocator.init(&out_buffer);
     while (ctx.running) {
-        fixed_alloc.reset();
         while (driver.listener.next()) |notif| {
+            fixed_alloc.reset();
             var string_writer = std.ArrayList(u8).init(fixed_alloc.allocator());
             const info = notification{
                 .channel = notif.channel,

@@ -156,9 +156,7 @@ pub const driver = struct {
             if (idx == 0) {
                 md.columns = try self.alloc.alloc(column_info, 1);
             } else {
-                if (!self.alloc.resize(md.columns.?, idx + 1)) {
-                    std.log.err("resizing column failed.\n", .{});
-                }
+                md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
             }
             md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
             md.columns.?[idx].connection_table = null;
@@ -189,9 +187,7 @@ pub const driver = struct {
             if (idx == 0) {
                 md.columns = try self.alloc.alloc(column_info, 1);
             } else {
-                if (!self.alloc.resize(md.columns.?, idx + 1)) {
-                    std.log.err("resizing column failed.\n", .{});
-                }
+                md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
             }
             md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
             md.columns.?[idx].connection_table = connection_table{
