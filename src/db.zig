@@ -93,6 +93,7 @@ pub const table_info = struct {
 /// Main driver of DB connections and queries.
 pub const driver = struct {
     str_buffer: [4096 * 2]u8,
+    tsa: std.heap.ThreadSafeAllocator,
     fpa: std.heap.FixedBufferAllocator,
     alloc: std.mem.Allocator,
     tables: std.ArrayList(table_info),
@@ -120,9 +121,11 @@ pub const driver = struct {
             .listener = undefined,
             .pool = db,
             .fpa = undefined,
+            .tsa = undefined,
             .str_buffer = undefined,
         };
         driver_obj.fpa = std.heap.FixedBufferAllocator.init(@constCast(&driver_obj.str_buffer));
+        driver_obj.tsa.child_allocator = driver_obj.fpa.allocator();
         return driver_obj;
     }
 
@@ -143,15 +146,15 @@ pub const driver = struct {
     }
 
     fn grab_primary_keys(self: *driver, table: table_info) !metadata {
-        defer self.fpa.reset();
         const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
         const table_name = table.name[(dot_idx + 1)..];
         const schema_name = table.name[0..dot_idx];
         const query = try std.fmt.allocPrint(
-            self.fpa.allocator(),
+            self.tsa.allocator(),
             primary_key_query,
             .{ table_name, schema_name },
         );
+        defer self.tsa.child_allocator.free(query);
         const result = try self.pool.query(query, .{});
         defer result.deinit();
         var idx: usize = 0;
@@ -159,7 +162,6 @@ pub const driver = struct {
             .type = metadata_t.PRIMARY_KEY,
             .columns = null,
         };
-        errdefer self.alloc.free(md.columns.?);
         while (try result.next()) |row| {
             if (idx == 0) {
                 md.columns = try self.alloc.alloc(column_info, 1);
@@ -174,15 +176,15 @@ pub const driver = struct {
     }
 
     fn grab_foreign_keys(self: *driver, table: table_info) !metadata {
-        defer self.fpa.reset();
         const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
         const table_name = table.name[(dot_idx + 1)..];
         const schema_name = table.name[0..dot_idx];
         const query = try std.fmt.allocPrint(
-            self.fpa.allocator(),
+            self.tsa.allocator(),
             foreign_keys_query,
             .{ schema_name, table_name },
         );
+        defer self.tsa.child_allocator.free(query);
         const result = try self.pool.query(query, .{});
         defer result.deinit();
         var idx: usize = 0;
@@ -190,7 +192,6 @@ pub const driver = struct {
             .type = metadata_t.FOREIGN_KEY,
             .columns = null,
         };
-        errdefer self.alloc.free(md.columns.?);
         while (try result.next()) |row| {
             if (idx == 0) {
                 md.columns = try self.alloc.alloc(column_info, 1);
@@ -220,14 +221,16 @@ pub const driver = struct {
     }
 
     fn single_creation_query(self: *driver, table: table_info) !void {
-        defer self.fpa.reset();
-        const safe_name = try driver.sanitize_name(self.fpa.allocator(), table.name);
+        const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
+        defer self.tsa.child_allocator.free(safe_name);
 
-        const func_query = try std.fmt.allocPrint(self.fpa.allocator(), create_funcs, .{ safe_name, table.name });
+        const func_query = try std.fmt.allocPrint(self.tsa.allocator(), create_funcs, .{ safe_name, table.name });
         _ = try self.pool.exec(func_query, .{});
+        defer self.tsa.child_allocator.free(func_query);
 
-        const trigger_query = try std.fmt.allocPrint(self.fpa.allocator(), create_triggers, .{ safe_name, table.name, safe_name });
+        const trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), create_triggers, .{ safe_name, table.name, safe_name });
         _ = try self.pool.exec(trigger_query, .{});
+        defer self.tsa.child_allocator.free(trigger_query);
     }
 
     fn execute_creation_queries(self: *driver) !void {
@@ -238,14 +241,16 @@ pub const driver = struct {
     }
 
     fn single_delete_query(self: *driver, table: table_info) !void {
-        defer self.fpa.reset();
-        const safe_name = try driver.sanitize_name(self.fpa.allocator(), table.name);
+        const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
+        defer self.tsa.child_allocator.free(safe_name);
 
-        const drop_trigger_query = try std.fmt.allocPrint(self.fpa.allocator(), drop_triggers, .{ safe_name, table.name });
+        const drop_trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), drop_triggers, .{ safe_name, table.name });
         _ = try self.pool.exec(drop_trigger_query, .{});
+        defer self.tsa.child_allocator.free(drop_trigger_query);
 
-        const drop_func_query = try std.fmt.allocPrint(self.fpa.allocator(), drop_functions, .{safe_name});
+        const drop_func_query = try std.fmt.allocPrint(self.tsa.allocator(), drop_functions, .{safe_name});
         _ = try self.pool.exec(drop_func_query, .{});
+        defer self.tsa.child_allocator.free(drop_func_query);
     }
 
     fn execute_deletion_queries(self: *driver) !void {
@@ -269,6 +274,7 @@ pub const driver = struct {
     }
 
     pub fn deinit(self: *driver) !void {
+        // this feels ugly. maybe pull this stuff out into their structure's deinit method's
         try self.tear_down_listeners();
         for (0..self.tables.items.len) |table_idx| {
             const table = self.tables.items[table_idx];
@@ -292,13 +298,13 @@ pub const driver = struct {
         self.pool.deinit();
     }
 
-    fn sanitize_name(alloc: std.mem.Allocator, name: []u8) ![]u8 {
+    fn sanitize_name(alloc: std.mem.Allocator, name: []const u8) ![]u8 {
         const result: []u8 = try alloc.alloc(u8, name.len);
         for (name, 0..) |ch, idx| {
-            if (ch != '.') {
-                result[idx] = ch;
-            } else {
+            if (ch == '.') {
                 result[idx] = '_';
+            } else {
+                result[idx] = ch;
             }
         }
         return result;
