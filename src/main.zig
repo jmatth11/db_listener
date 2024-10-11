@@ -36,6 +36,11 @@ pub fn main() !void {
         .mask = std.posix.empty_sigset,
         .flags = 0,
     }, null);
+    try std.posix.sigaction(std.posix.SIG.TERM, &.{
+        .handler = .{ .handler = shutdown },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    }, null);
 
     // setup routes
     routes.init(config_values);

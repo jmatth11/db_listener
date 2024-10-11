@@ -32,7 +32,9 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
     };
-    ctx = Context{};
+    ctx = Context{
+        .listening_thread = undefined,
+    };
 }
 
 /// Deinitialize the channel internals
@@ -42,12 +44,31 @@ pub fn deinit() !void {
 
 /// Websocket route
 pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
-    if (try httpz.upgradeWebsocket(ws_handler, req, res, ctx) == false) {
+    if (try httpz.upgradeWebsocket(ws_handler, req, res, &ctx) == false) {
         res.status = 400;
         res.body = "invalid websocket handshake";
         return;
     }
     // when upgradeWebsocket succeeds, you can no longer use `res`
+}
+
+/// Function to send payload to client
+fn send_notification(allocator: std.mem.Allocator, conn: *websocket.Conn, table_map: std.StringHashMap(*db.table_info), channel: []const u8, payload: []const u8) !void {
+    var string_writer = std.ArrayList(u8).init(allocator);
+    defer string_writer.deinit();
+    const info = notification{
+        .channel = channel,
+        .payload = payload,
+        .metadata = table_map.get(channel).?.*,
+    };
+    info.metadata.to_str();
+    try std.json.stringify(
+        info,
+        .{},
+        string_writer.writer(),
+    );
+    try conn.write(string_writer.items);
+    std.log.debug("Channel: {s}\nPayload: {s}\n", .{ channel, payload });
 }
 
 /// The main listener function to communicate DB notifications to the front-end.
@@ -65,20 +86,13 @@ fn listener(conn: *websocket.Conn) !void {
     while (ctx.running) {
         while (driver.listener.next()) |notif| {
             fixed_alloc.reset();
-            var string_writer = std.ArrayList(u8).init(fixed_alloc.allocator());
-            const info = notification{
-                .channel = notif.channel,
-                .payload = notif.payload,
-                .metadata = metadata_hm.get(notif.channel).?.*,
-            };
-            info.metadata.to_str();
-            try std.json.stringify(
-                info,
-                .{},
-                string_writer.writer(),
+            try send_notification(
+                fixed_alloc.allocator(),
+                conn,
+                metadata_hm,
+                notif.channel,
+                notif.payload,
             );
-            try conn.write(string_writer.items);
-            std.log.debug("Channel: {s}\nPayload: {s}\n", .{ notif.channel, notif.payload });
         }
         switch (driver.listener.err.?) {
             .pg => |pg| std.debug.print("pg - {s}\n", .{pg.message}),
@@ -95,33 +109,33 @@ fn listener(conn: *websocket.Conn) !void {
 /// Main context object to bridge data across threads
 const Context = struct {
     running: bool = true,
+    listening_thread: std.Thread,
 };
 
 /// Websocket handler
 const ws_handler = struct {
-    ctx: Context,
+    ctx: *Context,
     conn: *websocket.Conn,
-    listening_thread: std.Thread,
 
     // MUST have these 3 public functions
-    pub fn init(conn: *websocket.Conn, ctx_t: Context) !ws_handler {
+    pub fn init(conn: *websocket.Conn, ctx_t: *Context) !ws_handler {
+        ctx_t.listening_thread = try std.Thread.spawn(.{}, listener, .{conn});
         return .{
             .conn = conn,
             .ctx = ctx_t,
-            .listening_thread = try std.Thread.spawn(.{}, listener, .{conn}),
         };
     }
 
     pub fn handle(self: *ws_handler, message: websocket.Message) !void {
         const data = message.data;
         if (std.mem.eql(u8, data, "close")) {
-            ctx.running = false;
-            self.listening_thread.join();
+            self.ctx.running = false;
+            self.ctx.listening_thread.join();
         }
     }
 
     pub fn close(self: *ws_handler) void {
-        ctx.running = false;
-        self.listening_thread.join();
+        self.ctx.running = false;
+        self.ctx.listening_thread.join();
     }
 };

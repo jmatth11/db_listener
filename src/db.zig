@@ -96,6 +96,7 @@ pub const driver = struct {
     tsa: std.heap.ThreadSafeAllocator,
     fpa: std.heap.FixedBufferAllocator,
     alloc: std.mem.Allocator,
+
     tables: std.ArrayList(table_info),
     pool: *pg.Pool,
     listener: pg.Listener,
