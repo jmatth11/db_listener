@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 const websocket = httpz.websocket;
 const db = @import("db.zig");
 const args = @import("args.zig");
+const assert = std.debug.assert;
 
 pub var ctx: Context = undefined;
 var alloc: std.mem.Allocator = undefined;
@@ -56,10 +57,12 @@ pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
 fn send_notification(allocator: std.mem.Allocator, conn: *websocket.Conn, table_map: std.StringHashMap(*db.table_info), channel: []const u8, payload: []const u8) !void {
     var string_writer = std.ArrayList(u8).init(allocator);
     defer string_writer.deinit();
+    const md_optional = table_map.get(channel);
+    assert(md_optional != null);
     const info = notification{
         .channel = channel,
         .payload = payload,
-        .metadata = table_map.get(channel).?.*,
+        .metadata = md_optional.?.*,
     };
     info.metadata.to_str();
     try std.json.stringify(
