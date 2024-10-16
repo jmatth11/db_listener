@@ -125,7 +125,7 @@ pub const driver = struct {
             .tsa = undefined,
             .str_buffer = undefined,
         };
-        driver_obj.fpa = std.heap.FixedBufferAllocator.init(@constCast(&driver_obj.str_buffer));
+        driver_obj.fpa = std.heap.FixedBufferAllocator.init(&driver_obj.str_buffer);
         driver_obj.tsa.child_allocator = driver_obj.fpa.allocator();
         return driver_obj;
     }

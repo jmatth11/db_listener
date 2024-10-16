@@ -25,6 +25,6 @@ pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
 fn write_out_file(res: *httpz.Response, d: []const u8, f: []const u8) !void {
     res.content_type = httpz.ContentType.forExtension(std.fs.path.extension(f));
     const cur_dir = std.fs.cwd();
-    const path = try std.fs.path.join(res.arena, &[2][]u8{ @constCast(d), @constCast(f) });
+    const path = try std.fs.path.join(res.arena, &[2][]const u8{ d, f });
     res.body = try cur_dir.readFileAlloc(res.arena, path, std.math.maxInt(usize));
 }
