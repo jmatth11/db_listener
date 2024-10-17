@@ -16,7 +16,7 @@ pub fn get_home(req: *httpz.Request, res: *httpz.Response) !void {
     try write_out_file(res, conf.server.web_dir, index_html);
 }
 
-// Get static assets
+/// Get static assets
 pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
     std.log.info("in assets: {s}", .{req.url.path});
     try write_out_file(res, conf.server.web_dir, req.url.path);

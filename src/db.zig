@@ -1,44 +1,7 @@
 const std = @import("std");
 const pg = @import("pg");
 const args = @import("args.zig");
-
-/// postgres queries for grabbing tables and metadata info.
-const tables_query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema', 'typeorm');";
-const foreign_keys_query =
-    \\SELECT
-    \\	kcu.column_name,
-    \\    ccu.table_schema || '.' || ccu.table_name AS f_table_name,
-    \\    ccu.column_name AS f_column_name
-    \\FROM information_schema.table_constraints AS tc
-    \\JOIN information_schema.key_column_usage AS kcu
-    \\    ON tc.constraint_name = kcu.constraint_name
-    \\    AND tc.table_schema = kcu.table_schema
-    \\JOIN information_schema.constraint_column_usage AS ccu
-    \\    ON ccu.constraint_name = tc.constraint_name
-    \\WHERE tc.constraint_type = 'FOREIGN KEY'
-    \\    AND tc.table_schema='{s}'
-    \\    AND tc.table_name='{s}';
-;
-const primary_key_query =
-    \\SELECT c.column_name, c.data_type
-    \\FROM information_schema.table_constraints tc
-    \\JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name)
-    \\JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
-    \\  AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
-    \\WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = '{s}' and c.table_schema='{s}';
-;
-const create_funcs =
-    \\create or replace function {s}_fn()returns trigger as $f$
-    \\begin perform pg_notify('{s}',to_jsonb(new)::text);
-    \\      return new;
-    \\end $f$ language plpgsql;
-;
-const create_triggers =
-    \\create trigger {s}_tr after insert or update or delete on {s}
-    \\for each row execute function {s}_fn();
-;
-const drop_functions = "DROP FUNCTION IF EXISTS {s}_fn;";
-const drop_triggers = "DROP TRIGGER IF EXISTS {s}_tr ON {s};";
+const queries = @import("queries.zig");
 
 /// metadata type info
 pub const metadata_t = struct {
@@ -152,7 +115,7 @@ pub const driver = struct {
         const schema_name = table.name[0..dot_idx];
         const query = try std.fmt.allocPrint(
             self.tsa.allocator(),
-            primary_key_query,
+            queries.primary_key_query,
             .{ table_name, schema_name },
         );
         defer self.tsa.child_allocator.free(query);
@@ -182,7 +145,7 @@ pub const driver = struct {
         const schema_name = table.name[0..dot_idx];
         const query = try std.fmt.allocPrint(
             self.tsa.allocator(),
-            foreign_keys_query,
+            queries.foreign_keys_query,
             .{ schema_name, table_name },
         );
         defer self.tsa.child_allocator.free(query);
@@ -210,7 +173,7 @@ pub const driver = struct {
     }
 
     fn grab_tables(self: *driver) !void {
-        var results = try self.pool.query(tables_query, .{});
+        var results = try self.pool.query(queries.tables_query, .{});
         defer results.deinit();
         while (try results.next()) |row| {
             try self.single_grab_table(row);
@@ -225,11 +188,11 @@ pub const driver = struct {
         const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
         defer self.tsa.child_allocator.free(safe_name);
 
-        const func_query = try std.fmt.allocPrint(self.tsa.allocator(), create_funcs, .{ safe_name, table.name });
+        const func_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.create_funcs, .{ safe_name, table.name });
         _ = try self.pool.exec(func_query, .{});
         defer self.tsa.child_allocator.free(func_query);
 
-        const trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), create_triggers, .{ safe_name, table.name, safe_name });
+        const trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.create_triggers, .{ safe_name, table.name, safe_name });
         _ = try self.pool.exec(trigger_query, .{});
         defer self.tsa.child_allocator.free(trigger_query);
     }
@@ -245,11 +208,11 @@ pub const driver = struct {
         const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
         defer self.tsa.child_allocator.free(safe_name);
 
-        const drop_trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), drop_triggers, .{ safe_name, table.name });
+        const drop_trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.drop_triggers, .{ safe_name, table.name });
         _ = try self.pool.exec(drop_trigger_query, .{});
         defer self.tsa.child_allocator.free(drop_trigger_query);
 
-        const drop_func_query = try std.fmt.allocPrint(self.tsa.allocator(), drop_functions, .{safe_name});
+        const drop_func_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.drop_functions, .{safe_name});
         _ = try self.pool.exec(drop_func_query, .{});
         defer self.tsa.child_allocator.free(drop_func_query);
     }
