@@ -2,56 +2,7 @@ const std = @import("std");
 const pg = @import("pg");
 const args = @import("args.zig");
 const queries = @import("queries.zig");
-
-/// metadata type info
-pub const metadata_t = struct {
-    const PRIMARY_KEY = "PRIMARY_KEY";
-    const FOREIGN_KEY = "FOREIGN_KEY";
-};
-
-/// Structure to hold tables connected by foreign keys.
-pub const connection_table = struct {
-    table_name: []u8,
-    column_name: []u8,
-};
-
-/// Structure to hold column_name that is a foreign key along with connected table info.
-pub const column_info = struct {
-    column_name: []u8,
-    connection_table: ?connection_table = null,
-};
-
-/// Metadata structure to hold primary/foreign key info.
-pub const metadata = struct {
-    type: [*:0]const u8,
-    columns: ?[]column_info,
-};
-
-/// Structure to hold Table info.
-pub const table_info = struct {
-    name: []u8,
-    metadatas: [2]metadata,
-
-    /// Print out table info for debug purposes.
-    pub fn to_str(self: *const table_info) void {
-        std.debug.print("name: {s}\n", .{self.name});
-        std.debug.print("metadatas:\n", .{});
-        for (self.metadatas) |md| {
-            std.debug.print("  type: {s}\n", .{md.type});
-            std.debug.print("  columns:\n", .{});
-            if (md.columns) |columns| {
-                for (columns) |col| {
-                    std.debug.print("    column_name: {s}\n", .{col.column_name});
-                    std.debug.print("    connection_table:\n", .{});
-                    if (col.connection_table) |ct| {
-                        std.debug.print("      table_name: {s}\n", .{ct.table_name});
-                        std.debug.print("      column_name: {s}\n", .{ct.column_name});
-                    }
-                }
-            }
-        }
-    }
-};
+const tables = @import("tables.zig");
 
 /// Main driver of DB connections and queries.
 pub const driver = struct {
@@ -60,7 +11,7 @@ pub const driver = struct {
     fpa: std.heap.FixedBufferAllocator,
     alloc: std.mem.Allocator,
 
-    tables: std.ArrayList(table_info),
+    tables: std.ArrayList(tables.info),
     pool: *pg.Pool,
     listener: pg.Listener,
 
@@ -81,7 +32,7 @@ pub const driver = struct {
         errdefer db.deinit();
         var driver_obj = driver{
             .alloc = alloc,
-            .tables = std.ArrayList(table_info).init(alloc),
+            .tables = std.ArrayList(tables.info).init(alloc),
             .listener = undefined,
             .pool = db,
             .fpa = undefined,
@@ -101,7 +52,7 @@ pub const driver = struct {
     }
 
     fn single_grab_table(self: *driver, row: pg.Row) !void {
-        const local_info = table_info{
+        const local_info = tables.info{
             .name = try self.make_str_copy(row, 0),
             .metadatas = undefined,
         };
@@ -109,7 +60,7 @@ pub const driver = struct {
         try self.tables.append(local_info);
     }
 
-    fn grab_primary_keys(self: *driver, table: table_info) !metadata {
+    fn grab_primary_keys(self: *driver, table: tables.info) !tables.metadata {
         const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
         const table_name = table.name[(dot_idx + 1)..];
         const schema_name = table.name[0..dot_idx];
@@ -122,13 +73,13 @@ pub const driver = struct {
         const result = try self.pool.query(query, .{});
         defer result.deinit();
         var idx: usize = 0;
-        var md: metadata = metadata{
-            .type = metadata_t.PRIMARY_KEY,
+        var md: tables.metadata = tables.metadata{
+            .type = tables.metadata_t.PRIMARY_KEY,
             .columns = null,
         };
         while (try result.next()) |row| {
             if (idx == 0) {
-                md.columns = try self.alloc.alloc(column_info, 1);
+                md.columns = try self.alloc.alloc(tables.column_info, 1);
             } else {
                 md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
             }
@@ -139,7 +90,7 @@ pub const driver = struct {
         return md;
     }
 
-    fn grab_foreign_keys(self: *driver, table: table_info) !metadata {
+    fn grab_foreign_keys(self: *driver, table: tables.info) !tables.metadata {
         const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
         const table_name = table.name[(dot_idx + 1)..];
         const schema_name = table.name[0..dot_idx];
@@ -152,18 +103,18 @@ pub const driver = struct {
         const result = try self.pool.query(query, .{});
         defer result.deinit();
         var idx: usize = 0;
-        var md: metadata = metadata{
-            .type = metadata_t.FOREIGN_KEY,
+        var md: tables.metadata = tables.metadata{
+            .type = tables.metadata_t.FOREIGN_KEY,
             .columns = null,
         };
         while (try result.next()) |row| {
             if (idx == 0) {
-                md.columns = try self.alloc.alloc(column_info, 1);
+                md.columns = try self.alloc.alloc(tables.column_info, 1);
             } else {
                 md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
             }
             md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
-            md.columns.?[idx].connection_table = connection_table{
+            md.columns.?[idx].connection_table = tables.connection_table{
                 .table_name = try self.make_str_copy(row, 1),
                 .column_name = try self.make_str_copy(row, 2),
             };
@@ -184,7 +135,7 @@ pub const driver = struct {
         }
     }
 
-    fn single_creation_query(self: *driver, table: table_info) !void {
+    fn single_creation_query(self: *driver, table: tables.info) !void {
         const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
         defer self.tsa.child_allocator.free(safe_name);
 
@@ -204,7 +155,7 @@ pub const driver = struct {
         }
     }
 
-    fn single_delete_query(self: *driver, table: table_info) !void {
+    fn single_delete_query(self: *driver, table: tables.info) !void {
         const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
         defer self.tsa.child_allocator.free(safe_name);
 
