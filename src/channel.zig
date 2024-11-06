@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 const websocket = httpz.websocket;
 const db = @import("db.zig");
 const args = @import("args.zig");
+const tables = @import("tables.zig");
 const assert = std.debug.assert;
 
 pub var ctx: Context = undefined;
@@ -16,7 +17,7 @@ const notification = struct {
     /// The payload (payload from pg_notify)
     payload: []const u8,
     /// Metadata info (primary key and foreign key info)
-    metadata: db.table_info,
+    metadata: tables.info,
 };
 
 /// Initialize the DB and websocket client.
@@ -54,7 +55,13 @@ pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 /// Function to send payload to client
-fn send_notification(allocator: std.mem.Allocator, conn: *websocket.Conn, table_map: std.StringHashMap(*db.table_info), channel: []const u8, payload: []const u8) !void {
+fn send_notification(
+    allocator: std.mem.Allocator,
+    conn: *websocket.Conn,
+    table_map: std.StringHashMap(*tables.info),
+    channel: []const u8,
+    payload: []const u8,
+) !void {
     var string_writer = std.ArrayList(u8).init(allocator);
     defer string_writer.deinit();
     const md_optional = table_map.get(channel);
@@ -77,10 +84,10 @@ fn send_notification(allocator: std.mem.Allocator, conn: *websocket.Conn, table_
 /// The main listener function to communicate DB notifications to the front-end.
 fn listener(conn: *websocket.Conn) !void {
     std.log.info("listening on tables:", .{});
-    var metadata_hm = std.StringHashMap(*db.table_info).init(alloc);
+    var metadata_hm = std.StringHashMap(*tables.info).init(alloc);
     defer metadata_hm.deinit();
     for (0..driver.tables.items.len) |idx| {
-        const table: *db.table_info = &driver.tables.items[idx];
+        const table: *tables.info = &driver.tables.items[idx];
         std.log.info("table_name={s}", .{table.name});
         try metadata_hm.put(table.name, table);
     }

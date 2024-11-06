@@ -54,8 +54,8 @@ pub const driver = struct {
     }
 
     fn single_grab_table(self: *driver, row: pg.Row) !void {
-        const local_info = try tables.info.init(self.alloc, row.get([]u8, 0));
-        errdefer local_info.deinit();
+        var local_info = try tables.info.init(self.alloc, row.get([]u8, 0));
+        errdefer local_info.deinit(self.alloc);
         try self.tables.append(local_info);
     }
 
@@ -79,9 +79,6 @@ pub const driver = struct {
                     .{ schema_name, table_name },
                 );
             },
-            else => {
-                return driver_errors.unsupported_type;
-            },
         }
         defer self.tsa.child_allocator.free(query);
         const result = try self.pool.query(query, .{});
@@ -89,17 +86,15 @@ pub const driver = struct {
         while (try result.next()) |row| {
             switch (key_type) {
                 query_type.PRIMARY_KEY => {
-                    try table.add_primary_keys(row.get([]u8, 0));
+                    try table.add_primary_keys(self.alloc, row.get([]u8, 0));
                 },
                 query_type.FOREIGN_KEY => {
                     try table.add_foreign_keys(
+                        self.alloc,
                         row.get([]u8, 0),
                         row.get([]u8, 1),
                         row.get([]u8, 2),
                     );
-                },
-                else => {
-                    return driver_errors.unsupported_type;
                 },
             }
         }
@@ -113,8 +108,8 @@ pub const driver = struct {
         }
         var idx: usize = 0;
         while (idx < self.tables.items.len) : (idx += 1) {
-            self.grab_metadata(query_type.PRIMARY_KEY, &self.tables.items[idx]);
-            self.grab_metadata(query_type.FOREIGN_KEY, &self.tables.items[idx]);
+            try self.grab_metadata(query_type.PRIMARY_KEY, &self.tables.items[idx]);
+            try self.grab_metadata(query_type.FOREIGN_KEY, &self.tables.items[idx]);
         }
     }
 
@@ -174,7 +169,7 @@ pub const driver = struct {
     pub fn deinit(self: *driver) !void {
         try self.tear_down_listeners();
         for (0..self.tables.items.len) |table_idx| {
-            self.tables.items[table_idx].deinit();
+            self.tables.items[table_idx].deinit(self.alloc);
         }
         self.tables.deinit();
         self.pool.deinit();
