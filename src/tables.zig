@@ -7,7 +7,7 @@ pub const metadata_t = struct {
 };
 
 /// Structure to hold tables connected by foreign keys.
-pub const connection_table = struct {
+const connection_table = struct {
     table_name: []const u8,
     column_name: []const u8,
 
@@ -18,7 +18,7 @@ pub const connection_table = struct {
 };
 
 /// Structure to hold column_name that is a foreign key along with connected table info.
-pub const column_info = struct {
+const column_info = struct {
     column_name: []const u8,
     connection_table: ?connection_table = null,
 
@@ -31,7 +31,7 @@ pub const column_info = struct {
 };
 
 /// Metadata structure to hold primary/foreign key info.
-pub const metadata = struct {
+const metadata = struct {
     type: [*:0]const u8,
     columns: ?[]column_info,
 

@@ -4,6 +4,15 @@ const args = @import("args.zig");
 const queries = @import("queries.zig");
 const tables = @import("tables.zig");
 
+const query_type = enum(u32) {
+    PRIMARY_KEY,
+    FOREIGN_KEY,
+};
+
+pub const driver_errors = error{
+    unsupported_type,
+};
+
 /// Main driver of DB connections and queries.
 pub const driver = struct {
     str_buffer: [4096 * 2]u8,
@@ -44,83 +53,56 @@ pub const driver = struct {
         return driver_obj;
     }
 
-    fn make_str_copy(self: *driver, row: pg.Row, idx: usize) ![]u8 {
-        const value = row.get([]u8, idx);
-        const result = try self.alloc.alloc(u8, value.len);
-        @memcpy(result, value);
-        return result;
-    }
-
     fn single_grab_table(self: *driver, row: pg.Row) !void {
-        const local_info = tables.info{
-            .name = try self.make_str_copy(row, 0),
-            .metadatas = undefined,
-        };
-        errdefer self.alloc.free(local_info.name);
+        const local_info = try tables.info.init(self.alloc, row.get([]u8, 0));
+        errdefer local_info.deinit();
         try self.tables.append(local_info);
     }
 
-    fn grab_primary_keys(self: *driver, table: tables.info) !tables.metadata {
+    fn grab_metadata(self: *driver, key_type: query_type, table: *tables.info) !void {
         const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
         const table_name = table.name[(dot_idx + 1)..];
         const schema_name = table.name[0..dot_idx];
-        const query = try std.fmt.allocPrint(
-            self.tsa.allocator(),
-            queries.primary_key_query,
-            .{ table_name, schema_name },
-        );
+        var query: []const u8 = undefined;
+        switch (key_type) {
+            query_type.PRIMARY_KEY => {
+                query = try std.fmt.allocPrint(
+                    self.tsa.allocator(),
+                    queries.primary_key_query,
+                    .{ table_name, schema_name },
+                );
+            },
+            query_type.FOREIGN_KEY => {
+                query = try std.fmt.allocPrint(
+                    self.tsa.allocator(),
+                    queries.foreign_keys_query,
+                    .{ schema_name, table_name },
+                );
+            },
+            else => {
+                return driver_errors.unsupported_type;
+            },
+        }
         defer self.tsa.child_allocator.free(query);
         const result = try self.pool.query(query, .{});
         defer result.deinit();
-        var idx: usize = 0;
-        var md: tables.metadata = tables.metadata{
-            .type = tables.metadata_t.PRIMARY_KEY,
-            .columns = null,
-        };
         while (try result.next()) |row| {
-            if (idx == 0) {
-                md.columns = try self.alloc.alloc(tables.column_info, 1);
-            } else {
-                md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
+            switch (key_type) {
+                query_type.PRIMARY_KEY => {
+                    try table.add_primary_keys(row.get([]u8, 0));
+                },
+                query_type.FOREIGN_KEY => {
+                    try table.add_foreign_keys(
+                        row.get([]u8, 0),
+                        row.get([]u8, 1),
+                        row.get([]u8, 2),
+                    );
+                },
+                else => {
+                    return driver_errors.unsupported_type;
+                },
             }
-            md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
-            md.columns.?[idx].connection_table = null;
-            idx += 1;
         }
-        return md;
-    }
-
-    fn grab_foreign_keys(self: *driver, table: tables.info) !tables.metadata {
-        const dot_idx = std.ascii.indexOfIgnoreCase(table.name, ".").?;
-        const table_name = table.name[(dot_idx + 1)..];
-        const schema_name = table.name[0..dot_idx];
-        const query = try std.fmt.allocPrint(
-            self.tsa.allocator(),
-            queries.foreign_keys_query,
-            .{ schema_name, table_name },
-        );
-        defer self.tsa.child_allocator.free(query);
-        const result = try self.pool.query(query, .{});
-        defer result.deinit();
-        var idx: usize = 0;
-        var md: tables.metadata = tables.metadata{
-            .type = tables.metadata_t.FOREIGN_KEY,
-            .columns = null,
-        };
-        while (try result.next()) |row| {
-            if (idx == 0) {
-                md.columns = try self.alloc.alloc(tables.column_info, 1);
-            } else {
-                md.columns = try self.alloc.realloc(md.columns.?, idx + 1);
-            }
-            md.columns.?[idx].column_name = try self.make_str_copy(row, 0);
-            md.columns.?[idx].connection_table = tables.connection_table{
-                .table_name = try self.make_str_copy(row, 1),
-                .column_name = try self.make_str_copy(row, 2),
-            };
-            idx += 1;
-        }
-        return md;
     }
 
     fn grab_tables(self: *driver) !void {
@@ -129,9 +111,10 @@ pub const driver = struct {
         while (try results.next()) |row| {
             try self.single_grab_table(row);
         }
-        for (self.tables.items, 0..) |table, idx| {
-            self.tables.items[idx].metadatas[0] = try self.grab_primary_keys(table);
-            self.tables.items[idx].metadatas[1] = try self.grab_foreign_keys(table);
+        var idx: usize = 0;
+        while (idx < self.tables.items.len) : (idx += 1) {
+            self.grab_metadata(query_type.PRIMARY_KEY, &self.tables.items[idx]);
+            self.grab_metadata(query_type.FOREIGN_KEY, &self.tables.items[idx]);
         }
     }
 
@@ -189,25 +172,9 @@ pub const driver = struct {
     }
 
     pub fn deinit(self: *driver) !void {
-        // this feels ugly. maybe pull this stuff out into their structure's deinit method's
         try self.tear_down_listeners();
         for (0..self.tables.items.len) |table_idx| {
-            const table = self.tables.items[table_idx];
-            self.alloc.free(table.name);
-            for (0..table.metadatas.len) |md_idx| {
-                const md = table.metadatas[md_idx];
-                if (md.columns) |columns| {
-                    for (0..columns.len) |col_idx| {
-                        const col = columns[col_idx];
-                        self.alloc.free(col.column_name);
-                        if (col.connection_table) |ct| {
-                            self.alloc.free(ct.column_name);
-                            self.alloc.free(ct.table_name);
-                        }
-                    }
-                    self.alloc.free(md.columns.?);
-                }
-            }
+            self.tables.items[table_idx].deinit();
         }
         self.tables.deinit();
         self.pool.deinit();
