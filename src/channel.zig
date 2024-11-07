@@ -9,6 +9,7 @@ const assert = std.debug.assert;
 pub var ctx: Context = undefined;
 var alloc: std.mem.Allocator = undefined;
 var driver: db.driver = undefined;
+var main_thread: std.Thread = undefined;
 
 /// Notification structure to send to the connected web socket client.
 const notification = struct {
@@ -37,6 +38,7 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
     ctx = Context{
         .listening_thread = undefined,
     };
+    //main_thread = try std.Thread.spawn(.{}, listener, .{conn});
 }
 
 /// Deinitialize the channel internals
@@ -44,6 +46,7 @@ pub fn deinit() !void {
     try driver.deinit();
 }
 
+// TODO change to remember client connection
 /// Websocket route
 pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
     if (try httpz.upgradeWebsocket(ws_handler, req, res, &ctx) == false) {
@@ -81,6 +84,7 @@ fn send_notification(
     std.log.debug("Channel: {s}\nPayload: {s}\n", .{ channel, payload });
 }
 
+// TODO change to send messages on array of clients
 /// The main listener function to communicate DB notifications to the front-end.
 fn listener(conn: *websocket.Conn) !void {
     std.log.info("listening on tables:", .{});
@@ -119,7 +123,6 @@ fn listener(conn: *websocket.Conn) !void {
 /// Main context object to bridge data across threads
 const Context = struct {
     running: bool = true,
-    listening_thread: std.Thread,
 };
 
 /// Websocket handler
@@ -129,7 +132,6 @@ const ws_handler = struct {
 
     // MUST have these 3 public functions
     pub fn init(conn: *websocket.Conn, ctx_t: *Context) !ws_handler {
-        ctx_t.listening_thread = try std.Thread.spawn(.{}, listener, .{conn});
         return .{
             .conn = conn,
             .ctx = ctx_t,
