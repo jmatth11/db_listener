@@ -61,6 +61,6 @@ pub fn main() !void {
 }
 
 fn shutdown(_: c_int) callconv(.C) void {
-    channel.ctx.running = false;
+    channel.running = false;
     server.stop();
 }
