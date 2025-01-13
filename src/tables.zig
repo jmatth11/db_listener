@@ -11,6 +11,11 @@ const connection_table = struct {
     table_name: []const u8,
     column_name: []const u8,
 
+    pub fn to_str(self: *const connection_table) void {
+        std.debug.print("      table_name: {s}\n", .{self.table_name});
+        std.debug.print("      column_name: {s}\n", .{self.column_name});
+    }
+
     pub fn deinit(self: *const connection_table, alloc: std.mem.Allocator) void {
         alloc.free(self.table_name);
         alloc.free(self.column_name);
@@ -22,6 +27,14 @@ const column_info = struct {
     column_name: []const u8,
     connection_table: ?connection_table = null,
 
+    pub fn to_str(self: *const column_info) void {
+        std.debug.print("    column_name: {s}\n", .{self.column_name});
+        std.debug.print("    connection_table:\n", .{});
+        if (self.connection_table) |ct| {
+            ct.to_str();
+        }
+    }
+
     pub fn deinit(self: *const column_info, alloc: std.mem.Allocator) void {
         alloc.free(self.column_name);
         if (self.connection_table) |con| {
@@ -32,7 +45,7 @@ const column_info = struct {
 
 /// Metadata structure to hold primary/foreign key info.
 const metadata = struct {
-    type: [*:0]const u8,
+    type: []const u8,
     columns: ?[]column_info = null,
 
     pub fn add_column(self: *metadata, alloc: std.mem.Allocator, col_name: []const u8) !void {
@@ -42,7 +55,10 @@ const metadata = struct {
             self.columns = try alloc.alloc(column_info, 1);
         }
         if (self.columns) |col| {
-            col[col.len - 1].column_name = try alloc.dupe(u8, col_name);
+            const cur_col = column_info{
+                .column_name = try alloc.dupe(u8, col_name),
+            };
+            col[col.len - 1] = cur_col;
         }
     }
 
@@ -59,12 +75,26 @@ const metadata = struct {
             self.columns = try alloc.alloc(column_info, 1);
         }
         if (self.columns) |col| {
-            var cur_col = &col[col.len - 1];
-            cur_col.column_name = try alloc.dupe(u8, key);
-            cur_col.connection_table = connection_table{
-                .column_name = try alloc.dupe(u8, con_col),
-                .table_name = try alloc.dupe(u8, con_table),
+            var cur_col = column_info{
+                .column_name = try alloc.dupe(u8, key),
             };
+            if (con_table.len > 0) {
+                cur_col.connection_table = connection_table{
+                    .column_name = try alloc.dupe(u8, con_col),
+                    .table_name = try alloc.dupe(u8, con_table),
+                };
+            }
+            col[col.len - 1] = cur_col;
+        }
+    }
+
+    pub fn to_str(self: *const metadata) void {
+        std.debug.print("  type: {s}\n", .{self.type});
+        std.debug.print("  columns:\n", .{});
+        if (self.columns) |columns| {
+            for (columns) |col| {
+                col.to_str();
+            }
         }
     }
 
@@ -116,23 +146,12 @@ pub const info = struct {
         }
     }
 
-    /// Print out table info for debug purposes.
+    // Print out table info for debug purposes.
     pub fn to_str(self: *const info) void {
         std.debug.print("name: {s}\n", .{self.name});
         std.debug.print("metadatas:\n", .{});
         for (self.metadatas) |md| {
-            std.debug.print("  type: {s}\n", .{md.type});
-            std.debug.print("  columns:\n", .{});
-            if (md.columns) |columns| {
-                for (columns) |col| {
-                    std.debug.print("    column_name: {s}\n", .{col.column_name});
-                    std.debug.print("    connection_table:\n", .{});
-                    if (col.connection_table) |ct| {
-                        std.debug.print("      table_name: {s}\n", .{ct.table_name});
-                        std.debug.print("      column_name: {s}\n", .{ct.column_name});
-                    }
-                }
-            }
+            md.to_str();
         }
     }
 };
