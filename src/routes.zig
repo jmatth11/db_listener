@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const args = @import("args.zig");
+const channel = @import("channel.zig");
 
 var conf: args.config = undefined;
 const index_html = "index.html";
@@ -11,13 +12,13 @@ pub fn init(config: args.config) void {
 }
 
 /// Get home page
-pub fn get_home(req: *httpz.Request, res: *httpz.Response) !void {
+pub fn get_home(_: channel.Handler, req: *httpz.Request, res: *httpz.Response) !void {
     std.log.info("in home: from {d}", .{req.address.in.sa.addr});
     try write_out_file(res, conf.server.web_dir, index_html);
 }
 
 /// Get static assets
-pub fn get_assets(req: *httpz.Request, res: *httpz.Response) !void {
+pub fn get_assets(_: channel.Handler, req: *httpz.Request, res: *httpz.Response) !void {
     std.log.info("in assets: {s}", .{req.url.path});
     try write_out_file(res, conf.server.web_dir, req.url.path);
 }

@@ -1,8 +1,7 @@
 /// postgres queries for grabbing tables and metadata info.
 pub const tables_query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog', 'information_schema', 'typeorm');";
 pub const foreign_keys_query =
-    \\SELECT
-    \\	kcu.column_name,
+    \\SELECT kcu.column_name,
     \\    ccu.table_schema || '.' || ccu.table_name AS f_table_name,
     \\    ccu.column_name AS f_column_name
     \\FROM information_schema.table_constraints AS tc

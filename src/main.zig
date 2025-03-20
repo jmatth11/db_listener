@@ -4,7 +4,7 @@ const httpz = @import("httpz");
 const channel = @import("channel.zig");
 const routes = @import("routes.zig");
 
-var server: httpz.ServerCtx(void, void) = undefined;
+var server: httpz.Server(channel.Handler) = undefined;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -24,19 +24,19 @@ pub fn main() !void {
         std.debug.print("handler deinit failed: {}\n", .{err});
     };
     // setup server
-    server = try httpz.Server().init(gpa.allocator(), .{
+    server = try httpz.Server(channel.Handler).init(gpa.allocator(), .{
         .address = config_values.server.host,
         .port = config_values.server.port,
-    });
+    }, channel.Handler{});
     defer server.deinit();
 
     // register our intent to handle SIGINT
-    try std.posix.sigaction(std.posix.SIG.INT, &.{
+    std.posix.sigaction(std.posix.SIG.INT, &.{
         .handler = .{ .handler = shutdown },
         .mask = std.posix.empty_sigset,
         .flags = 0,
     }, null);
-    try std.posix.sigaction(std.posix.SIG.TERM, &.{
+    std.posix.sigaction(std.posix.SIG.TERM, &.{
         .handler = .{ .handler = shutdown },
         .mask = std.posix.empty_sigset,
         .flags = 0,
@@ -44,11 +44,11 @@ pub fn main() !void {
 
     // setup routes
     routes.init(config_values);
-    var router = server.router();
+    var router = try server.router(.{});
     // a normal route
-    router.get("/ws", channel.ws);
-    router.get("/", routes.get_home);
-    router.get("/static/*", routes.get_assets);
+    router.get("/ws", channel.ws, .{});
+    router.get("/", routes.get_home, .{});
+    router.get("/static/*", routes.get_assets, .{});
 
     // this will block until server.stop() is called
     // which will then run the server.deinit() we setup above with `defer`

@@ -13,6 +13,10 @@ var alloc: std.mem.Allocator = undefined;
 var driver: db.driver = undefined;
 var main_thread: std.Thread = undefined;
 
+pub const Handler = struct {
+    pub const WebsocketHandler = ws_handler;
+};
+
 /// Notification structure to send to the connected web socket client.
 const notification = struct {
     /// The channel (table schema and name)
@@ -63,7 +67,7 @@ pub fn deinit() !void {
 }
 
 /// Websocket route
-pub fn ws(req: *httpz.Request, res: *httpz.Response) !void {
+pub fn ws(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     const local_ctx = WSContext{
         .address = req.address.in.sa.addr,
     };
@@ -142,14 +146,14 @@ fn listener(ctx: *ThreadContext) !void {
 }
 
 /// Websocket handler
-const ws_handler = struct {
+pub const ws_handler = struct {
     ctx: WSContext,
     conn: *websocket.Conn,
 
     // MUST have these 3 public functions
     pub fn init(conn: *websocket.Conn, ctx_t: WSContext) !ws_handler {
         if (thread_ctx.connections.get(ctx_t.address)) |thread| {
-            thread.close();
+            try thread.close(.{});
         }
         try thread_ctx.connections.put(ctx_t.address, conn);
         return .{
@@ -158,14 +162,14 @@ const ws_handler = struct {
         };
     }
 
-    pub fn handle(self: *ws_handler, message: websocket.Message) !void {
-        const data = message.data;
+    pub fn clientMessage(self: *ws_handler, message: []const u8) !void {
+        const data = message;
         if (std.mem.eql(u8, data, "close")) {
-            self.conn.close();
+            try self.conn.close(.{});
         }
     }
 
-    pub fn close(self: *ws_handler) void {
-        _ = thread_ctx.connections.remove(self.ctx.address);
-    }
+    //pub fn close(self: *ws_handler) void {
+    //    _ = thread_ctx.connections.remove(self.ctx.address);
+    //}
 };
