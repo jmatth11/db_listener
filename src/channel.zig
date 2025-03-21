@@ -169,7 +169,7 @@ pub const ws_handler = struct {
         }
     }
 
-    //pub fn close(self: *ws_handler) void {
-    //    _ = thread_ctx.connections.remove(self.ctx.address);
-    //}
+    pub fn close(self: *ws_handler) void {
+        _ = thread_ctx.connections.remove(self.ctx.address);
+    }
 };
