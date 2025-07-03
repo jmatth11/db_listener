@@ -16,12 +16,9 @@ pub fn main() !void {
         return err;
     };
     // Setup handler's context before setting websocket route
-    channel.init(std.heap.page_allocator, config_values) catch |err| {
+    channel.init(gpa.allocator(), config_values) catch |err| {
         std.debug.print("error initializing channel handler: {}\n", .{err});
         return err;
-    };
-    defer channel.deinit() catch |err| {
-        std.debug.print("handler deinit failed: {}\n", .{err});
     };
     // setup server
     server = try httpz.Server(channel.Handler).init(gpa.allocator(), .{
@@ -61,6 +58,8 @@ pub fn main() !void {
 }
 
 fn shutdown(_: c_int) callconv(.C) void {
-    channel.running = false;
+    channel.deinit() catch |err| {
+        std.debug.print("handler deinit failed: {}\n", .{err});
+    };
     server.stop();
 }
