@@ -43,9 +43,7 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
     };
-    errdefer driver.deinit() catch |err| {
-        std.debug.print("errdefer driver.deinit failed: {}\n", .{err});
-    };
+    errdefer driver.deinit();
     driver.setup_listeners() catch |err| {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
@@ -59,12 +57,17 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
 }
 
 /// Deinitialize the channel internals
-pub fn deinit() !void {
-    try driver.deinit();
+pub fn deinit() void {
     thread_ctx.running = false;
-    main_thread.join();
-    // TODO maybe iterate through hashmap and close connections that were left open?
+    main_thread.detach();
+    //var vi = thread_ctx.connections.valueIterator();
+    //while (vi.next()) |con| {
+    //    con.*.close(.{}) catch |err| {
+    //        std.debug.print("error closing connection: {}", .{err});
+    //    };
+    //}
     thread_ctx.connections.deinit();
+    driver.deinit();
 }
 
 /// Websocket route
@@ -123,6 +126,7 @@ fn listener(ctx: *ThreadContext) !void {
     }
     var out_buffer: [4096 * 6]u8 = undefined;
     var fixed_alloc = std.heap.FixedBufferAllocator.init(&out_buffer);
+    defer fixed_alloc.reset();
     while (ctx.running) {
         while (driver.listener.next()) |notif| {
             fixed_alloc.reset();
@@ -138,7 +142,10 @@ fn listener(ctx: *ThreadContext) !void {
             .pg => |pg| std.debug.print("pg - {s}\n", .{pg.message}),
             .err => |err| {
                 const named_err = @errorName(err);
-                if (!std.mem.eql(u8, named_err, "WouldBlock")) {
+                if (std.mem.eql(u8, named_err, "Closed")) {
+                    ctx.running = false;
+                    break;
+                } else if (!std.mem.eql(u8, named_err, "WouldBlock")) {
                     std.debug.print("err - {s}\n", .{named_err});
                 }
             },

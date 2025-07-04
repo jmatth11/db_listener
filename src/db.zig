@@ -15,9 +15,6 @@ pub const driver_errors = error{
 
 /// Main driver of DB connections and queries.
 pub const driver = struct {
-    str_buffer: [4096 * 2]u8,
-    tsa: std.heap.ThreadSafeAllocator,
-    fpa: std.heap.FixedBufferAllocator,
     alloc: std.mem.Allocator,
 
     tables: std.ArrayList(tables.info),
@@ -39,22 +36,16 @@ pub const driver = struct {
             },
         });
         errdefer db.deinit();
-        var driver_obj = driver{
+        return .{
             .alloc = alloc,
             .tables = std.ArrayList(tables.info).init(alloc),
             .listener = undefined,
             .pool = db,
-            .fpa = undefined,
-            .tsa = undefined,
-            .str_buffer = undefined,
         };
-        driver_obj.fpa = std.heap.FixedBufferAllocator.init(&driver_obj.str_buffer);
-        driver_obj.tsa.child_allocator = driver_obj.fpa.allocator();
-        return driver_obj;
     }
 
     fn single_grab_table(self: *driver, row: pg.Row) !void {
-        var local_info = try tables.info.init(self.alloc, row.get([]u8, 0));
+        var local_info = try tables.info.init(self.alloc, row.get([]const u8, 0));
         errdefer local_info.deinit(self.alloc);
         try self.tables.append(local_info);
     }
@@ -67,26 +58,26 @@ pub const driver = struct {
         switch (key_type) {
             query_type.PRIMARY_KEY => {
                 query = try std.fmt.allocPrint(
-                    self.tsa.allocator(),
+                    self.alloc,
                     queries.primary_key_query,
                     .{ table_name, schema_name },
                 );
             },
             query_type.FOREIGN_KEY => {
                 query = try std.fmt.allocPrint(
-                    self.tsa.allocator(),
+                    self.alloc,
                     queries.foreign_keys_query,
                     .{ schema_name, table_name },
                 );
             },
         }
-        defer self.tsa.child_allocator.free(query);
+        defer self.alloc.free(query);
         const result = try self.pool.query(query, .{});
         defer result.deinit();
         while (try result.next()) |row| {
             switch (key_type) {
                 query_type.PRIMARY_KEY => {
-                    try table.add_primary_keys(self.alloc, row.get([]u8, 0));
+                    try table.add_primary_keys(self.alloc, row.get([]const u8, 0));
                 },
                 query_type.FOREIGN_KEY => {
                     try table.add_foreign_keys(
@@ -114,16 +105,16 @@ pub const driver = struct {
     }
 
     fn single_creation_query(self: *driver, table: tables.info) !void {
-        const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
-        defer self.tsa.child_allocator.free(safe_name);
+        const safe_name = try driver.sanitize_name(self.alloc, table.name);
+        defer self.alloc.free(safe_name);
 
-        const func_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.create_funcs, .{ safe_name, table.name });
+        const func_query = try std.fmt.allocPrint(self.alloc, queries.create_funcs, .{ safe_name, table.name });
         _ = try self.pool.exec(func_query, .{});
-        defer self.tsa.child_allocator.free(func_query);
+        defer self.alloc.free(func_query);
 
-        const trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.create_triggers, .{ safe_name, table.name, safe_name });
+        const trigger_query = try std.fmt.allocPrint(self.alloc, queries.create_triggers, .{ safe_name, table.name, safe_name });
         _ = try self.pool.exec(trigger_query, .{});
-        defer self.tsa.child_allocator.free(trigger_query);
+        defer self.alloc.free(trigger_query);
     }
 
     fn execute_creation_queries(self: *driver) !void {
@@ -134,16 +125,16 @@ pub const driver = struct {
     }
 
     fn single_delete_query(self: *driver, table: tables.info) !void {
-        const safe_name = try driver.sanitize_name(self.tsa.allocator(), table.name);
-        defer self.tsa.child_allocator.free(safe_name);
+        const safe_name = try driver.sanitize_name(self.alloc, table.name);
+        defer self.alloc.free(safe_name);
 
-        const drop_trigger_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.drop_triggers, .{ safe_name, table.name });
+        const drop_trigger_query = try std.fmt.allocPrint(self.alloc, queries.drop_triggers, .{ safe_name, table.name });
         _ = try self.pool.exec(drop_trigger_query, .{});
-        defer self.tsa.child_allocator.free(drop_trigger_query);
+        defer self.alloc.free(drop_trigger_query);
 
-        const drop_func_query = try std.fmt.allocPrint(self.tsa.allocator(), queries.drop_functions, .{safe_name});
+        const drop_func_query = try std.fmt.allocPrint(self.alloc, queries.drop_functions, .{safe_name});
         _ = try self.pool.exec(drop_func_query, .{});
-        defer self.tsa.child_allocator.free(drop_func_query);
+        defer self.alloc.free(drop_func_query);
     }
 
     fn execute_deletion_queries(self: *driver) !void {
@@ -161,13 +152,15 @@ pub const driver = struct {
         }
     }
 
-    pub fn tear_down_listeners(self: *driver) !void {
+    pub fn tear_down_listeners(self: *driver) void {
         self.listener.deinit();
-        try self.execute_deletion_queries();
+        self.execute_deletion_queries() catch |err| {
+            std.debug.print("error executing deletion queries: {}", .{err});
+        };
     }
 
-    pub fn deinit(self: *driver) !void {
-        try self.tear_down_listeners();
+    pub fn deinit(self: *driver) void {
+        self.tear_down_listeners();
         for (0..self.tables.items.len) |table_idx| {
             self.tables.items[table_idx].deinit(self.alloc);
         }
