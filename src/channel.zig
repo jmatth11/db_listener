@@ -60,12 +60,6 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
 pub fn deinit() void {
     thread_ctx.running = false;
     main_thread.detach();
-    //var vi = thread_ctx.connections.valueIterator();
-    //while (vi.next()) |con| {
-    //    con.*.close(.{}) catch |err| {
-    //        std.debug.print("error closing connection: {}", .{err});
-    //    };
-    //}
     thread_ctx.connections.deinit();
     driver.deinit();
 }
