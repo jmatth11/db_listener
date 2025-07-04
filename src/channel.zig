@@ -7,8 +7,7 @@ const tables = @import("tables.zig");
 const assert = std.debug.assert;
 
 const conn_type = std.AutoHashMap(u32, *websocket.Conn);
-pub var running: bool = true;
-var thread_ctx: ThreadContext = undefined;
+pub var thread_ctx: ThreadContext = undefined;
 var alloc: std.mem.Allocator = undefined;
 var driver: db.driver = undefined;
 var main_thread: std.Thread = undefined;
@@ -29,6 +28,7 @@ const notification = struct {
 
 const ThreadContext = struct {
     connections: conn_type,
+    running: bool,
 };
 
 /// Main context object to bridge data across threads
@@ -43,27 +43,25 @@ pub fn init(allocator: std.mem.Allocator, conf: args.config) !void {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
     };
-    errdefer driver.deinit() catch |err| {
-        std.debug.print("errdefer driver.deinit failed: {}\n", .{err});
-    };
+    errdefer driver.deinit();
     driver.setup_listeners() catch |err| {
         std.debug.print("initialize failed: {}\n", .{err});
         return err;
     };
     thread_ctx = ThreadContext{
         .connections = conn_type.init(alloc),
+        .running = true,
     };
     errdefer thread_ctx.connections.deinit();
     main_thread = try std.Thread.spawn(.{}, listener, .{&thread_ctx});
 }
 
 /// Deinitialize the channel internals
-pub fn deinit() !void {
-    try driver.deinit();
-    running = false;
-    main_thread.join();
-    // TODO maybe iterate through hashmap and close connections that were left open?
+pub fn deinit() void {
+    thread_ctx.running = false;
+    main_thread.detach();
     thread_ctx.connections.deinit();
+    driver.deinit();
 }
 
 /// Websocket route
@@ -122,7 +120,8 @@ fn listener(ctx: *ThreadContext) !void {
     }
     var out_buffer: [4096 * 6]u8 = undefined;
     var fixed_alloc = std.heap.FixedBufferAllocator.init(&out_buffer);
-    while (running) {
+    defer fixed_alloc.reset();
+    while (ctx.running) {
         while (driver.listener.next()) |notif| {
             fixed_alloc.reset();
             try send_notification(
@@ -137,7 +136,10 @@ fn listener(ctx: *ThreadContext) !void {
             .pg => |pg| std.debug.print("pg - {s}\n", .{pg.message}),
             .err => |err| {
                 const named_err = @errorName(err);
-                if (!std.mem.eql(u8, named_err, "WouldBlock")) {
+                if (std.mem.eql(u8, named_err, "Closed")) {
+                    ctx.running = false;
+                    break;
+                } else if (!std.mem.eql(u8, named_err, "WouldBlock")) {
                     std.debug.print("err - {s}\n", .{named_err});
                 }
             },

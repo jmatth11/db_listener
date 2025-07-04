@@ -103,6 +103,7 @@ const metadata = struct {
             for (columns) |col| {
                 col.deinit(alloc);
             }
+            alloc.free(columns);
         }
     }
 };
