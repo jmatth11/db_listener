@@ -85,8 +85,6 @@ fn send_notification(
     channel: []const u8,
     payload: []const u8,
 ) !void {
-    var string_writer = std.ArrayList(u8).init(allocator);
-    defer string_writer.deinit();
     const md_optional = table_map.get(channel);
     assert(md_optional != null);
     const info = notification{
@@ -94,16 +92,19 @@ fn send_notification(
         .payload = payload,
         .metadata = md_optional.?.*,
     };
+    // debug statement
     info.metadata.to_str();
-    try std.json.stringify(
-        info,
-        .{},
-        string_writer.writer(),
-    );
+
+    // json stringify
+    const json_fmt = std.json.fmt(info, .{});
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    try json_fmt.format(&writer.writer);
+    const json_string = try writer.toOwnedSlice();
+    defer allocator.free(json_string);
     // TODO need to make thread safe
     var iter = ctx.connections.valueIterator();
     while (iter.next()) |conn| {
-        try conn.*.write(string_writer.items);
+        try conn.*.write(json_string);
     }
     std.log.debug("Channel: {s}\nPayload: {s}\n", .{ channel, payload });
 }

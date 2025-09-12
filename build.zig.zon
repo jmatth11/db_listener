@@ -25,16 +25,16 @@
     // internet connectivity.
     .dependencies = .{
         .pg = .{
-            .url = "git+https://github.com/karlseguin/pg.zig?ref=master#693388ca7c29278ad6a5d1b27bd007be32ec2bc2",
-            .hash = "pg-0.0.0-Wp_7gdX4BQCDJwuyYYOfvFmJyOtXRzgUpoGBTtTYDzFV",
+            .url = "git+https://github.com/karlseguin/pg.zig?ref=master#f930e90b735ebadf28244c7a31e9c442b264b544",
+            .hash = "pg-0.0.0-Wp_7gfoJBgDfkQBaWRTwjYcTdNyS8UHRDmMTs4NuSmxY",
         },
         .clap = .{
-            .url = "git+https://github.com/Hejsil/zig-clap?ref=0.10.0#e47028deaefc2fb396d3d9e9f7bd776ae0b2a43a",
-            .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
+            .url = "git+https://github.com/Hejsil/zig-clap#5289e0753cd274d65344bef1c114284c633536ea",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
         .httpz = .{
-            .url = "git+https://github.com/karlseguin/http.zig?ref=master#0ce9038e13c138423f68d95a475159039458e798",
-            .hash = "httpz-0.0.0-PNVzrJ-0BgAp8WPkVfsFGNPRlRpBoU-8w0LxMDXBp37t",
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#94fc151741af0f8b6962966046743c0726b1ec35",
+            .hash = "httpz-0.0.0-PNVzrFe5BgDabt7p2mEiv4PXNOZxJvxR0cMOBtQmP3uR",
         },
     },
     .paths = .{

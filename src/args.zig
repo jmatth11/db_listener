@@ -67,7 +67,7 @@ pub fn parse_args(alloc: std.mem.Allocator) !config {
         .diagnostic = &diag,
         .allocator = alloc,
     }) catch |err| {
-        diag.report(std.io.getStdErr().writer(), err) catch {};
+        diag.reportToFile(.stderr(), err) catch {};
         return err;
     };
     defer res.deinit();

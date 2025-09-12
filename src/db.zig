@@ -4,6 +4,8 @@ const args = @import("args.zig");
 const queries = @import("queries.zig");
 const tables = @import("tables.zig");
 
+const TableInfoList = std.array_list.Managed(tables.info);
+
 const query_type = enum(u32) {
     PRIMARY_KEY,
     FOREIGN_KEY,
@@ -17,7 +19,7 @@ pub const driver_errors = error{
 pub const driver = struct {
     alloc: std.mem.Allocator,
 
-    tables: std.ArrayList(tables.info),
+    tables: TableInfoList,
     pool: *pg.Pool,
     listener: pg.Listener,
 
@@ -38,7 +40,7 @@ pub const driver = struct {
         errdefer db.deinit();
         return .{
             .alloc = alloc,
-            .tables = std.ArrayList(tables.info).init(alloc),
+            .tables = TableInfoList.init(alloc),
             .listener = undefined,
             .pool = db,
         };
@@ -148,7 +150,7 @@ pub const driver = struct {
         try self.execute_creation_queries();
         self.listener = try self.pool.newListener();
         for (self.tables.items) |table| {
-            try self.listener.listen(table.name);
+            try self.listener.listen(table.name, .{});
         }
     }
 

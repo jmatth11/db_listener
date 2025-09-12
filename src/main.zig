@@ -5,6 +5,7 @@ const channel = @import("channel.zig");
 const routes = @import("routes.zig");
 
 var server: httpz.Server(channel.Handler) = undefined;
+const empty_sig: [16]c_ulong = @splat(0);
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -29,14 +30,14 @@ pub fn main() !void {
     defer server.deinit();
 
     // register our intent to handle SIGINT
-    std.posix.sigaction(std.posix.SIG.INT, &.{
+    _ = std.c.sigaction(std.posix.SIG.INT, &.{
         .handler = .{ .handler = shutdown },
-        .mask = std.posix.empty_sigset,
+        .mask = empty_sig,
         .flags = 0,
     }, null);
-    std.posix.sigaction(std.posix.SIG.TERM, &.{
+    _ = std.c.sigaction(std.posix.SIG.TERM, &.{
         .handler = .{ .handler = shutdown },
-        .mask = std.posix.empty_sigset,
+        .mask = empty_sig,
         .flags = 0,
     }, null);
 
@@ -58,6 +59,6 @@ pub fn main() !void {
     try server.listen();
 }
 
-fn shutdown(_: c_int) callconv(.C) void {
+export fn shutdown(_: c_int) void {
     server.stop();
 }
