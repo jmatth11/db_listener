@@ -15,11 +15,17 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const root_module = b.createModule(
+        .{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        },
+    );
+
     const exe = b.addExecutable(.{
         .name = "db_listener",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = root_module,
     });
 
     const pg = b.dependency("pg", .{
@@ -64,9 +70,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = root_module,
     });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
