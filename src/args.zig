@@ -7,6 +7,8 @@ pub const arg_error = error{
     help,
     /// Generic invalid parameter for an argument.
     invalid_param,
+    /// Unsupported format.
+    unsupported_format,
 };
 
 /// Configuration values for Postgres database.
@@ -43,6 +45,18 @@ pub const config = struct {
     server: server_info = server_info{},
 };
 
+fn pull_env_args(comptime T: type, key: [*:0]const u8) !?T {
+    if (std.c.getenv(key)) |env_var| {
+        const value = std.mem.span(env_var);
+        return switch (T) {
+            []const u8 => value,
+            u16, u32 => try std.fmt.parseInt(T, value, 10),
+            else => arg_error.unsupported_format,
+        };
+    }
+    return null;
+}
+
 /// Parse command line arguments.
 ///
 /// @param alloc Standard allocator.
@@ -73,23 +87,49 @@ pub fn parse_args(alloc: std.mem.Allocator) !config {
     defer res.deinit();
 
     // TODO validate params
-    if (res.args.help != 0)
+    if (res.args.help != 0) {
+        try clap.helpToFile(.stdout(), clap.Help, &params, .{});
         return arg_error.help;
-    if (res.args.pg_host) |val|
+    }
+    if (res.args.pg_host) |val| {
         result.pg.host = val;
-    if (res.args.pg_port) |val|
+    } else if (try pull_env_args([]const u8, "PG_HOST")) |val| {
+        result.pg.host = val;
+    }
+    if (res.args.pg_port) |val| {
         result.pg.port = val;
-    if (res.args.pg_username) |val|
+    } else if (try pull_env_args(u16, "PG_PORT")) |val| {
+        result.pg.port = val;
+    }
+    if (res.args.pg_username) |val| {
         result.pg.username = val;
-    if (res.args.pg_password) |val|
+    } else if (try pull_env_args([]const u8, "PG_USERNAME")) |val| {
+        result.pg.username = val;
+    }
+    if (res.args.pg_password) |val| {
         result.pg.password = val;
-    if (res.args.pg_database) |val|
+    } else if (try pull_env_args([]const u8, "PG_PASSWORD")) |val| {
+        result.pg.password = val;
+    }
+    if (res.args.pg_database) |val| {
         result.pg.database = val;
-    if (res.args.server_host) |val|
+    } else if (try pull_env_args([]const u8, "PG_DATABASE")) |val| {
+        result.pg.database = val;
+    }
+    if (res.args.server_host) |val| {
         result.server.host = val;
-    if (res.args.server_port) |val|
+    } else if (try pull_env_args([]const u8, "SERVER_HOST")) |val| {
+        result.server.host = val;
+    }
+    if (res.args.server_port) |val| {
         result.server.port = val;
-    if (res.args.web_dir) |val|
+    } else if (try pull_env_args(u16, "SERVER_PORT")) |val| {
+        result.server.port = val;
+    }
+    if (res.args.web_dir) |val| {
         result.server.web_dir = val;
+    } else if (try pull_env_args([]const u8, "WEB_DIR")) |val| {
+        result.server.web_dir = val;
+    }
     return result;
 }
